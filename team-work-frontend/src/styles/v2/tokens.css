@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+[data-ui-v2][data-theme='light'] {
+  --color-primary: #4f46e5;
+  --color-on-primary: #ffffff;
+  --color-secondary: #6366f1;
+  --color-accent: #10b981;
+  --color-background: #eef2ff;
+  --color-foreground: #0f172a;
+  --color-card: #ffffff;
+  --color-card-foreground: #0f172a;
+  --color-muted: #e0e7ff;
+  --color-muted-foreground: #64748b;
+  --color-border: #e2e8f0;
+  --color-destructive: #dc2626;
+  --color-ring: #4f46e5;
+  --color-nav: #ffffff;
+  --color-nav-foreground: #334155;
+  --color-nav-active: #e0e7ff;
+  --color-shell: #eef2ff;
+  --color-hero: linear-gradient(135deg, #312e81, #4f46e5);
+  --color-hero-sub: #1e1b4b;
+  --shadow-soft: 0 12px 32px rgb(79 70 229 / 8%);
+  --motion-duration: 200ms;
+  --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --space-page: 20px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --bento-gap: 12px;
+}
+
+[data-ui-v2][data-theme='dark'] {
+  --color-primary: #22c55e;
+  --color-on-primary: #0f172a;
+  --color-secondary: #14b8a6;
+  --color-accent: #38bdf8;
+  --color-background: #020617;
+  --color-foreground: #f8fafc;
+  --color-card: #0e1223;
+  --color-card-foreground: #f8fafc;
+  --color-muted: #1a1e2f;
+  --color-muted-foreground: #94a3b8;
+  --color-border: #334155;
+  --color-destructive: #ef4444;
+  --color-ring: #e2e8f0;
+  --color-nav: #0b1120;
+  --color-nav-foreground: #cbd5e1;
+  --color-nav-active: #1e293b;
+  --color-shell: #020617;
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 35%);
+  --motion-duration: 200ms;
+  --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --space-page: 24px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+[data-ui-v2] {
+  font-family:
+    'Plus Jakarta Sans',
+    'Noto Sans SC',
+    'PingFang SC',
+    'Microsoft YaHei',
+    system-ui,
+    sans-serif;
+  color: var(--color-foreground);
+  background: var(--color-background);
+}
+
+[data-ui-v2] {
+  --el-color-primary: var(--color-primary);
+  --el-color-primary-light-3: color-mix(in srgb, var(--color-primary) 70%, white);
+  --el-color-primary-light-5: color-mix(in srgb, var(--color-primary) 50%, white);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--color-primary) 85%, black);
+  --el-bg-color: var(--color-card);
+  --el-bg-color-page: var(--color-background);
+  --el-text-color-primary: var(--color-card-foreground);
+  --el-text-color-regular: var(--color-muted-foreground);
+  --el-border-color: var(--color-border);
+  --el-border-color-light: color-mix(in srgb, var(--color-border) 60%, transparent);
+  --el-fill-color-blank: var(--color-card);
+  --el-border-radius-base: 8px;
+  --el-font-family:
+    'Plus Jakarta Sans', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+}
