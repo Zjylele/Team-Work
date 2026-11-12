@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -31,6 +32,11 @@ public class TeamController {
             return ResponseEntity.status(404).body(Map.of("message", "尚未加入团队"));
         }
         return ResponseEntity.ok(teamService.view(member));
+    }
+
+    @GetMapping("/api/team/members")
+    public List<TeamService.MemberView> members() {
+        return teamService.listMembers(currentAccount.requireMember());
     }
 
     @PostMapping("/api/team")
