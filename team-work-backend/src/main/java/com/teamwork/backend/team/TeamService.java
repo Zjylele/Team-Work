@@ -2,6 +2,7 @@ package com.teamwork.backend.team;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.teamwork.backend.account.Account;
+import com.teamwork.backend.account.AccountMapper;
 import com.teamwork.backend.common.ApiException;
 import com.teamwork.backend.common.InviteAttemptLimiter;
 import org.springframework.dao.DuplicateKeyException;
@@ -10,6 +11,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 public class TeamService {
@@ -19,12 +23,15 @@ public class TeamService {
 
     private final TeamMapper teams;
     private final TeamMemberMapper members;
+    private final AccountMapper accounts;
     private final InviteAttemptLimiter inviteAttemptLimiter;
     private final SecureRandom random = new SecureRandom();
 
-    public TeamService(TeamMapper teams, TeamMemberMapper members, InviteAttemptLimiter inviteAttemptLimiter) {
+    public TeamService(TeamMapper teams, TeamMemberMapper members, AccountMapper accounts,
+                       InviteAttemptLimiter inviteAttemptLimiter) {
         this.teams = teams;
         this.members = members;
+        this.accounts = accounts;
         this.inviteAttemptLimiter = inviteAttemptLimiter;
     }
 
@@ -83,6 +90,24 @@ public class TeamService {
         return TeamView.of(team, member.getRole(), TeamMember.CREATOR.equals(member.getRole()));
     }
 
+    public List<MemberView> listMembers(TeamMember actor) {
+        List<TeamMember> memberships = members.selectList(new LambdaQueryWrapper<TeamMember>()
+                .eq(TeamMember::getTeamId, actor.getTeamId())
+                .orderByAsc(TeamMember::getId));
+        if (memberships.isEmpty()) {
+            return List.of();
+        }
+        List<Long> accountIds = memberships.stream().map(TeamMember::getAccountId).toList();
+        Map<Long, Account> byId = accounts.selectList(new LambdaQueryWrapper<Account>().in(Account::getId, accountIds))
+                .stream()
+                .collect(Collectors.toMap(Account::getId, account -> account));
+        return memberships.stream().map(membership -> {
+            Account account = byId.get(membership.getAccountId());
+            String displayName = account == null ? "" : account.getDisplayName();
+            return new MemberView(membership.getAccountId(), displayName, membership.getRole());
+        }).toList();
+    }
+
     @Transactional
     public TeamView regenerateInvite(TeamMember creator) {
         Team team = requireTeam(creator.getTeamId());
@@ -122,5 +147,8 @@ public class TeamService {
         static TeamView of(Team team, String role, boolean includeCode) {
             return new TeamView(team.getId(), team.getName(), role, includeCode ? team.getInviteCode() : null);
         }
+    }
+
+    public record MemberView(Long id, String displayName, String role) {
     }
 }

@@ -1,5 +1,6 @@
 package com.teamwork.backend;
 
+import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -9,11 +10,14 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.Matchers.hasSize;
@@ -55,6 +59,18 @@ class TeamWorkFlowTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.role").value("MEMBER"))
                 .andExpect(jsonPath("$.inviteCode").value(nullValue()));
+
+        mockMvc.perform(get("/api/team/members").session(member))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[*].id").value(hasItem(Integer.parseInt(
+                        read(mockMvc.perform(get("/api/auth/me").session(member)).andReturn(), "$.id")))))
+                .andExpect(jsonPath("$[*].displayName").value(hasItem("创建者")))
+                .andExpect(jsonPath("$[*].displayName").value(hasItem("成员")))
+                .andExpect(jsonPath("$[*].role").value(hasItem("CREATOR")))
+                .andExpect(jsonPath("$[*].role").value(hasItem("MEMBER")));
+        mockMvc.perform(get("/api/team/members").session(register("outsider1", "password1", "未入团")))
+                .andExpect(status().isForbidden());
 
         mockMvc.perform(post("/api/projects").session(member).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -199,6 +215,35 @@ class TeamWorkFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"ZZZZZ\"}"))
                 .andExpect(status().isTooManyRequests());
+    }
+
+    @Test
+    void csrfTokenFromEndpointAllowsWriteAndCorsAllowsVite() throws Exception {
+        mockMvc.perform(options("/api/auth/login")
+                        .header("Origin", "http://localhost:5173")
+                        .header("Access-Control-Request-Method", "POST")
+                        .header("Access-Control-Request-Headers", "content-type,x-xsrf-token"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
+
+        MvcResult csrf = mockMvc.perform(get("/api/auth/csrf").header("Origin", "http://localhost:5173"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
+                .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
+                .andExpect(jsonPath("$.token").isString())
+                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
+                .andReturn();
+        String token = read(csrf, "$.token");
+        Cookie csrfCookie = csrf.getResponse().getCookie("XSRF-TOKEN");
+        mockMvc.perform(post("/api/auth/register")
+                        .header("Origin", "http://localhost:5173")
+                        .header("X-XSRF-TOKEN", token)
+                        .cookie(csrfCookie)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"csrfuser\",\"password\":\"password1\",\"displayName\":\"跨域用户\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("csrfuser"));
     }
 
     private MockHttpSession register(String username, String password, String displayName) throws Exception {
