@@ -1,42 +1,89 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from '../stores/session'
+import { pickLayout, pickView } from './resolveUi'
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: '/login',
-      component: () => import('../views/LoginView.vue'),
+      component: pickView(
+        () => import('../views/LoginView.vue'),
+        () => import('../views/v2/LoginView.vue'),
+      ),
       meta: { public: true },
     },
     {
       path: '/register',
-      component: () => import('../views/RegisterView.vue'),
+      component: pickView(
+        () => import('../views/RegisterView.vue'),
+        () => import('../views/v2/RegisterView.vue'),
+      ),
       meta: { public: true },
     },
     {
       path: '/join',
-      component: () => import('../views/JoinTeamView.vue'),
+      component: pickView(
+        () => import('../views/JoinTeamView.vue'),
+        () => import('../views/v2/JoinTeamView.vue'),
+      ),
     },
     {
       path: '/',
-      component: () => import('../layouts/AppLayout.vue'),
+      component: pickLayout(
+        () => import('../layouts/AppLayout.vue'),
+        () => import('../layouts/v2/AppLayoutRoot.vue'),
+      ),
       meta: { team: true },
       children: [
-        { path: '', name: 'workbench', component: () => import('../views/WorkbenchView.vue') },
-        { path: 'projects', name: 'projects', component: () => import('../views/ProjectsView.vue') },
+        {
+          path: '',
+          name: 'workbench',
+          component: pickView(
+            () => import('../views/WorkbenchView.vue'),
+            () => import('../views/v2/WorkbenchView.vue'),
+          ),
+        },
+        {
+          path: 'projects',
+          name: 'projects',
+          component: pickView(
+            () => import('../views/ProjectsView.vue'),
+            () => import('../views/v2/ProjectsView.vue'),
+          ),
+        },
         {
           path: 'projects/:projectId',
           name: 'project',
-          component: () => import('../views/ProjectDetailView.vue'),
+          component: pickView(
+            () => import('../views/ProjectDetailView.vue'),
+            () => import('../views/v2/ProjectDetailView.vue'),
+          ),
         },
-        { path: 'tasks/:taskId', name: 'task', component: () => import('../views/TaskDetailView.vue') },
+        {
+          path: 'tasks/:taskId',
+          name: 'task',
+          component: pickView(
+            () => import('../views/TaskDetailView.vue'),
+            () => import('../views/v2/TaskDetailView.vue'),
+          ),
+        },
         {
           path: 'notifications',
           name: 'notifications',
-          component: () => import('../views/NotificationsView.vue'),
+          component: pickView(
+            () => import('../views/NotificationsView.vue'),
+            () => import('../views/v2/NotificationsView.vue'),
+          ),
         },
-        { path: 'settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: pickView(
+            () => import('../views/SettingsView.vue'),
+            () => import('../views/v2/SettingsView.vue'),
+          ),
+        },
       ],
     },
   ],
