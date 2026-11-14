@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import static org.hamcrest.Matchers.hasItem;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -195,6 +196,22 @@ class TeamWorkFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"" + newCode + "\"}"))
                 .andExpect(status().isOk());
+        mockMvc.perform(delete("/api/projects/" + projectId).session(member).with(csrf()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/tasks/" + taskId).session(member).with(csrf()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/projects/" + projectId).session(creator))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(delete("/api/projects/" + projectId).session(creator).with(csrf()))
+                .andExpect(status().isNoContent());
+        mockMvc.perform(get("/api/tasks/" + taskId).session(member))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/projects").session(creator))
+                .andExpect(jsonPath("$", hasSize(0)));
+        mockMvc.perform(get("/api/notifications").session(member))
+                .andExpect(jsonPath("$", hasSize(0)));
+        mockMvc.perform(get("/api/workbench").session(member))
+                .andExpect(jsonPath("$.openTasks", hasSize(0)));
     }
 
     @Test

@@ -61,6 +61,16 @@ const router = createRouter({
           ),
         },
         {
+          path: 'projects/:projectId/pages',
+          name: 'project-pages',
+          component: () => import('../views/ProjectPagesView.vue'),
+        },
+        {
+          path: 'projects/:projectId/planning',
+          name: 'project-planning',
+          component: () => import('../views/PlanningView.vue'),
+        },
+        {
           path: 'tasks/:taskId',
           name: 'task',
           component: pickView(

@@ -7,6 +7,7 @@ import type {
   Stage,
   Task,
   TaskStatus,
+  TaskPriority,
   Team,
   TeamMemberView,
   Workbench,
@@ -47,6 +48,8 @@ export const teamApi = {
 }
 
 export const projectApi = {
+  rename: (id: number, name: string) => patch<Project>(`/api/projects/${id}`, { name }),
+  remove: (id: number) => del<void>(`/api/projects/${id}`),
   list: () => get<Project[]>('/api/projects'),
   create: (name: string) => post<Project>('/api/projects', { name }),
   stages: (projectId: number) => get<Stage[]>(`/api/projects/${projectId}/stages`),
@@ -58,13 +61,14 @@ export const projectApi = {
 }
 
 export const taskApi = {
+  remove: (id: number) => del<void>(`/api/tasks/${id}`),
   list: (projectId: number) => get<Task[]>(`/api/projects/${projectId}/tasks`),
   create: (
     projectId: number,
-    body: { title: string; description?: string; assigneeId: number; stageId: number },
+    body: { title: string; description?: string; assigneeId: number; stageId: number; priority?: TaskPriority; dueDate?: string },
   ) => post<Task>(`/api/projects/${projectId}/tasks`, body),
   get: (taskId: number) => get<Task>(`/api/tasks/${taskId}`),
-  update: (taskId: number, body: { title?: string; description?: string; assigneeId?: number; stageId?: number }) =>
+  update: (taskId: number, body: { title?: string; description?: string; assigneeId?: number; stageId?: number; priority?: TaskPriority; dueDate?: string }) =>
     patch<Task>(`/api/tasks/${taskId}`, body),
   start: (taskId: number) => post<Task>(`/api/tasks/${taskId}/start`),
   complete: (taskId: number) => post<Task>(`/api/tasks/${taskId}/complete`),

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import ThemeToggle from '../../components/v2/ThemeToggle.vue'
 import LayoutToggle from '../../components/v2/LayoutToggle.vue'
 import { useUiStore } from '../../stores/ui'
 import { useLayoutSession } from './useLayoutSession'
@@ -45,7 +44,6 @@ const ui = useUiStore()
         </button>
       </nav>
       <div class="tools">
-        <ThemeToggle />
         <LayoutToggle />
       </div>
       <div class="side-foot">
