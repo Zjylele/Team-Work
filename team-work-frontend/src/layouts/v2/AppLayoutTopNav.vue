@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import ThemeToggle from '../../components/v2/ThemeToggle.vue'
 import LayoutToggle from '../../components/v2/LayoutToggle.vue'
 import { useLayoutSession } from './useLayoutSession'
 
@@ -30,7 +29,6 @@ const { session, active, items, logout, go } = useLayoutSession()
       </nav>
       <div class="actions">
         <LayoutToggle />
-        <ThemeToggle />
         <span class="user">{{ session.account?.displayName }}</span>
         <button type="button" class="ghost" @click="logout">退出</button>
       </div>

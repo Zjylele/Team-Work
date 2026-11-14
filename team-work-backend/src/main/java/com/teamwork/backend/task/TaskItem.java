@@ -23,6 +23,9 @@ public class TaskItem {
     private String description;
     private Long assigneeId;
     private String status;
+    private String priority;
+    @com.baomidou.mybatisplus.annotation.TableField(updateStrategy = com.baomidou.mybatisplus.annotation.FieldStrategy.ALWAYS)
+    private java.time.LocalDate dueDate;
     private LocalDateTime createdAt;
 
     public static boolean valid(String status) {

@@ -34,6 +34,20 @@ public class ProjectService {
     }
 
     @Transactional
+    public ProjectView rename(TeamMember creator, Long projectId, String name) {
+        Project project = requireInTeam(projectId, creator.getTeamId());
+        project.setName(name);
+        projects.updateById(project);
+        return ProjectView.from(project);
+    }
+
+    @Transactional
+    public void delete(TeamMember creator, Long projectId) {
+        requireInTeam(projectId, creator.getTeamId());
+        projects.deleteById(projectId);
+    }
+
+    @Transactional
     public ProjectView create(TeamMember creator, String name) {
         Project project = new Project();
         project.setTeamId(creator.getTeamId());
@@ -98,9 +112,14 @@ public class ProjectService {
 
     @Transactional
     public void deleteStage(TeamMember creator, Long stageId) {
-        Stage stage = requireStage(creator, stageId);
-        Long taskCount = tasks.selectCount(new LambdaQueryWrapper<TaskItem>().eq(TaskItem::getStageId, stage.getId()));
-        if (taskCount != null && taskCount > 0) {
+        Stage stage = stages.selectOne(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getId, stageId).last("FOR UPDATE"));
+        if (stage == null) {
+            throw new ApiException(404, "阶段不存在");
+        }
+        requireInTeam(stage.getProjectId(), creator.getTeamId());
+        if (tasks.selectOne(new LambdaQueryWrapper<TaskItem>()
+                .eq(TaskItem::getStageId, stageId).last("LIMIT 1 FOR UPDATE")) != null) {
             throw new ApiException(409, "阶段下还有任务，不能删除");
         }
         stages.deleteById(stage.getId());

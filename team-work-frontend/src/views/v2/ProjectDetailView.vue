@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { projectApi, taskApi } from '../../api/client'
 import { ApiError } from '../../api/http'
 import type { Stage, Task } from '../../api/types'
 import { useSessionStore } from '../../stores/session'
-import { statusLabel, statusType } from '../../utils/status'
+import { STATUS_OPTIONS, statusLabel, statusType } from '../../utils/status'
+
+import { PRIORITY_LABELS } from '../../utils/priority'
+import type { TaskPriority } from '../../api/types'
+
+import { useTaskFilters } from '../../utils/taskFilters'
 
 const route = useRoute()
 const router = useRouter()
@@ -14,30 +19,42 @@ const session = useSessionStore()
 const projectId = computed(() => Number(route.params.projectId))
 const stages = ref<Stage[]>([])
 const tasks = ref<Task[]>([])
-const mode = ref<'list' | 'board'>('list')
+const mode = ref<'list' | 'board' | 'stage'>('list')
 const stageDialog = ref(false)
 const taskDialog = ref(false)
 const stageName = ref('')
 const taskForm = reactive({
   title: '',
+  priority: 'NONE' as TaskPriority,
+  dueDate: '',
   description: '',
   assigneeId: undefined as number | undefined,
   stageId: undefined as number | undefined,
   assigneeInput: '' as string,
 })
 
-const tasksByStage = computed(() => {
-  const map = new Map<number, Task[]>()
-  for (const stage of stages.value) {
-    map.set(stage.id, [])
-  }
-  for (const task of tasks.value) {
-    const list = map.get(task.stageId) || []
-    list.push(task)
-    map.set(task.stageId, list)
-  }
-  return map
+const filterStorageKey = computed(() => 'team-work:task-views:' + session.account?.id + ':' + projectId.value)
+const { filters, savedFilters, selectedFilter, hasSelectedFilter, loadFilter, saveFilter, removeFilter } =
+  useTaskFilters(filterStorageKey)
+const filteredTasks = computed(() => {
+  const search = filters.search.trim().toLowerCase()
+  return tasks.value.filter((task) =>
+    (!search || [task.title, task.assigneeName, task.description].some((text) => text?.toLowerCase().includes(search))) &&
+    (!filters.status || task.status === filters.status) &&
+    (!filters.priority || task.priority === filters.priority),
+  )
 })
+const boardColumns = computed(() => mode.value === 'stage'
+  ? stages.value.map((stage) => ({
+    value: stage.id,
+    label: stage.name,
+    tasks: filteredTasks.value.filter((task) => task.stageId === stage.id),
+  }))
+  : STATUS_OPTIONS.map((status) => ({
+    ...status,
+    tasks: filteredTasks.value.filter((task) => task.status === status.value),
+  })))
+
 
 function rememberFromTasks() {
   for (const task of tasks.value) {
@@ -95,6 +112,8 @@ async function removeStage(stage: Stage) {
 
 function openTaskDialog() {
   taskForm.title = ''
+  taskForm.priority = 'NONE'
+  taskForm.dueDate = ''
   taskForm.description = ''
   taskForm.assigneeId = session.account?.id
   taskForm.stageId = stages.value[0]?.id
@@ -114,6 +133,8 @@ async function createTask() {
   try {
     const created = await taskApi.create(projectId.value, {
       title: taskForm.title,
+      priority: taskForm.priority,
+      dueDate: taskForm.dueDate,
       description: taskForm.description || undefined,
       assigneeId,
       stageId: taskForm.stageId,
@@ -127,6 +148,28 @@ async function createTask() {
 
 watch(projectId, load)
 onMounted(load)
+const deleting = ref(false)
+
+async function removeProject() {
+  if (deleting.value) return
+  deleting.value = true
+  try {
+    await ElMessageBox.confirm('删除项目将同时删除所有阶段、任务及其评论和通知，且无法恢复。', '确认删除项目', {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await projectApi.remove(projectId.value)
+    ElMessage.success('项目已删除')
+    await router.replace('/projects')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error instanceof Error ? error.message : '删除失败')
+    }
+  } finally {
+    deleting.value = false
+  }
+}
 </script>
 
 <template>
@@ -139,14 +182,33 @@ onMounted(load)
         <h1 class="v2-title">项目详情</h1>
       </div>
       <div class="actions">
+        <el-button @click="router.push({ name: 'project-planning', params: { projectId } })">周期与模块</el-button>
+        <el-button @click="router.push({ name: 'project-pages', params: { projectId } })">文档与统计</el-button>
         <el-radio-group v-model="mode" size="small">
           <el-radio-button value="list">列表</el-radio-button>
-          <el-radio-button value="board">看板</el-radio-button>
+          <el-radio-button value="board">状态看板</el-radio-button>
+          <el-radio-button value="stage">阶段看板</el-radio-button>
         </el-radio-group>
+        <el-button v-if="session.isCreator" type="danger" plain :loading="deleting" @click="removeProject">删除项目</el-button>
         <el-button v-if="session.isCreator" @click="stageDialog = true">添加阶段</el-button>
         <el-button v-if="session.isCreator" type="primary" @click="openTaskDialog">新建任务</el-button>
       </div>
     </header>
+
+    <div class="task-filters">
+      <el-input v-model="filters.search" aria-label="搜索任务" placeholder="搜索任务、说明或负责人" clearable />
+      <el-select v-model="filters.status" aria-label="筛选状态" placeholder="所有状态" clearable>
+        <el-option v-for="item in STATUS_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />
+      </el-select>
+      <el-select v-model="filters.priority" aria-label="筛选优先级" placeholder="所有优先级" clearable>
+        <el-option v-for="(label, value) in PRIORITY_LABELS" :key="value" :label="label" :value="value" />
+      </el-select>
+      <el-select v-model="selectedFilter" aria-label="保存的视图" placeholder="保存的视图" @change="loadFilter">
+        <el-option v-for="view in savedFilters" :key="view.name" :label="view.name" :value="view.name" />
+      </el-select>
+      <el-button @click="saveFilter">保存当前视图</el-button>
+      <el-button :disabled="!hasSelectedFilter" @click="removeFilter">移除所选视图</el-button>
+    </div>
 
     <div v-if="session.isCreator" class="stages v2-card" style="padding: 12px; margin-bottom: 16px">
       <div v-for="stage in stages" :key="stage.id" class="stage-row">
@@ -158,9 +220,13 @@ onMounted(load)
     </div>
 
     <div v-if="mode === 'list'" class="v2-table-panel">
-      <el-table :data="tasks" empty-text="还没有任务">
+      <el-table :data="filteredTasks" empty-text="没有匹配的任务">
         <el-table-column prop="title" label="标题" min-width="140" />
-        <el-table-column prop="assigneeName" label="负责人" width="140" />
+        <el-table-column label="优先级" width="100">
+        <template #default="{ row }">{{ PRIORITY_LABELS[row.priority as TaskPriority] }}</template>
+      </el-table-column>
+      <el-table-column prop="dueDate" label="截止日期" width="120" />
+      <el-table-column prop="assigneeName" label="负责人" width="140" />
         <el-table-column label="阶段" width="140">
           <template #default="{ row }">
             {{ stages.find((item) => item.id === row.stageId)?.name || row.stageId }}
@@ -180,10 +246,10 @@ onMounted(load)
     </div>
 
     <div v-else class="board">
-      <div v-for="stage in stages" :key="stage.id" class="col v2-card">
-        <div class="col-title">{{ stage.name }}</div>
+      <div v-for="column in boardColumns" :key="column.value" class="col v2-card">
+        <div class="col-title">{{ column.label }} · {{ column.tasks.length }}</div>
         <button
-          v-for="task in tasksByStage.get(stage.id) || []"
+          v-for="task in column.tasks"
           :key="task.id"
           type="button"
           class="task-card"
@@ -191,7 +257,7 @@ onMounted(load)
         >
           <div>{{ task.title }}</div>
           <div class="meta">
-            <span>{{ task.assigneeName }}</span>
+            <span>{{ task.assigneeName }} · {{ PRIORITY_LABELS[task.priority] }}<template v-if="task.dueDate"> · {{ task.dueDate }}</template></span>
             <el-tag :type="statusType(task.status)" size="small">{{ statusLabel(task.status) }}</el-tag>
           </div>
         </button>
@@ -218,6 +284,14 @@ onMounted(load)
           <el-select v-model="taskForm.stageId" style="width: 100%">
             <el-option v-for="stage in stages" :key="stage.id" :label="stage.name" :value="stage.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="优先级">
+          <el-select v-model="taskForm.priority">
+            <el-option v-for="(label, value) in PRIORITY_LABELS" :key="value" :value="value" :label="label" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="截止日期">
+          <el-input v-model="taskForm.dueDate" type="date" />
         </el-form-item>
         <el-form-item label="负责人">
           <el-select
@@ -249,6 +323,13 @@ onMounted(load)
 </template>
 
 <style scoped>
+.task-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

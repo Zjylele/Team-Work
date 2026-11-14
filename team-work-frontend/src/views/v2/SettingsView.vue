@@ -3,7 +3,6 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import LayoutToggle from '../../components/v2/LayoutToggle.vue'
-import ThemeToggle from '../../components/v2/ThemeToggle.vue'
 import { profileApi } from '../../api/client'
 import { ApiError } from '../../api/http'
 import { useSessionStore } from '../../stores/session'
@@ -62,9 +61,8 @@ async function logout() {
 
     <el-card shadow="never" class="v2-card block">
       <h2 class="section">外观</h2>
-      <p class="hint">双主题与导航布局会保存在本浏览器。</p>
+      <p class="hint">导航布局会保存在本浏览器。</p>
       <div class="chips">
-        <ThemeToggle />
         <LayoutToggle />
       </div>
     </el-card>

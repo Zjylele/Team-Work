@@ -6,6 +6,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,7 +36,7 @@ public class TaskController {
     @PostMapping("/api/projects/{projectId}/tasks")
     public TaskService.TaskView create(@PathVariable Long projectId, @Valid @RequestBody TaskRequest request) {
         return taskService.create(currentAccount.requireCreator(), projectId, request.title(), request.description(),
-                request.assigneeId(), request.stageId());
+                request.assigneeId(), request.stageId(), request.priority(), request.dueDate());
     }
 
     @GetMapping("/api/tasks/{taskId}")
@@ -43,10 +44,16 @@ public class TaskController {
         return taskService.get(currentAccount.requireMember(), taskId);
     }
 
+    @DeleteMapping("/api/tasks/{taskId}")
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable Long taskId) {
+        taskService.delete(currentAccount.requireCreator(), taskId);
+    }
+
     @PatchMapping("/api/tasks/{taskId}")
     public TaskService.TaskView update(@PathVariable Long taskId, @RequestBody TaskUpdate request) {
         return taskService.update(currentAccount.requireMember(), taskId, request.title(), request.description(),
-                request.assigneeId(), request.stageId());
+                request.assigneeId(), request.stageId(), request.priority(), request.dueDate());
     }
 
     @PostMapping("/api/tasks/{taskId}/start")
@@ -81,11 +88,11 @@ public class TaskController {
             @Size(max = 2000, message = "说明最长 2000 个字符")
             String description,
             @NotNull(message = "请指定负责人") Long assigneeId,
-            @NotNull(message = "请指定阶段") Long stageId
+            @NotNull(message = "请指定阶段") Long stageId, String priority, String dueDate
     ) {
     }
 
-    public record TaskUpdate(String title, String description, Long assigneeId, Long stageId) {
+    public record TaskUpdate(String title, String description, Long assigneeId, Long stageId, String priority, String dueDate) {
     }
 
     public record StatusRequest(@NotBlank(message = "请填写状态") String status) {

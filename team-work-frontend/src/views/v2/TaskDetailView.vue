@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { projectApi, taskApi } from '../../api/client'
 import { ApiError } from '../../api/http'
 import type { Comment, Stage, Task, TaskStatus } from '../../api/types'
 import { useSessionStore } from '../../stores/session'
 import { STATUS_OPTIONS, formatTime, statusLabel, statusType } from '../../utils/status'
+
+import { PRIORITY_LABELS } from '../../utils/priority'
+import type { TaskPriority } from '../../api/types'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +21,8 @@ const stages = ref<Stage[]>([])
 const commentText = ref('')
 const description = ref('')
 const title = ref('')
+const priority = ref<TaskPriority>('NONE')
+const dueDate = ref('')
 const assigneeId = ref<number>()
 const stageId = ref<number>()
 const correctStatus = ref<TaskStatus>('TODO')
@@ -31,6 +36,8 @@ async function load() {
     stages.value = await projectApi.stages(task.value.projectId)
     description.value = task.value.description || ''
     title.value = task.value.title
+    priority.value = task.value.priority
+    dueDate.value = task.value.dueDate ?? ""
     assigneeId.value = task.value.assigneeId
     stageId.value = task.value.stageId
     correctStatus.value = task.value.status
@@ -74,6 +81,8 @@ async function saveMeta() {
   try {
     task.value = await taskApi.update(taskId.value, {
       title: title.value,
+      priority: priority.value,
+      dueDate: dueDate.value,
       assigneeId: Number(assigneeId.value),
       stageId: stageId.value,
     })
@@ -103,6 +112,28 @@ async function addComment() {
 }
 
 onMounted(load)
+const deleting = ref(false)
+
+async function removeTask() {
+  if (deleting.value) return
+  deleting.value = true
+  try {
+    await ElMessageBox.confirm('删除任务将同时删除相关评论和通知，且无法恢复。', '确认删除任务', {
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+    await taskApi.remove(taskId.value)
+    ElMessage.success('任务已删除')
+    await router.replace('/projects')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error instanceof Error ? error.message : '删除失败')
+    }
+  } finally {
+    deleting.value = false
+  }
+}
 </script>
 
 <template>
@@ -112,6 +143,7 @@ onMounted(load)
     </div>
     <header class="v2-page-header head">
       <h1 class="v2-title">{{ task.title }}</h1>
+      <p>优先级 {{ PRIORITY_LABELS[task.priority] }} · 截止 {{ task.dueDate || "未设置" }}</p>
       <el-tag :type="statusType(task.status)">{{ statusLabel(task.status) }}</el-tag>
     </header>
     <p class="v2-subtitle">负责人 {{ task.assigneeName }}</p>
@@ -121,11 +153,20 @@ onMounted(load)
       <el-button v-if="isAssignee && task.status === 'DOING'" type="success" @click="complete">结束</el-button>
     </div>
 
+    <el-button v-if="session.isCreator" type="danger" plain :loading="deleting" @click="removeTask">删除任务</el-button>
     <el-card v-if="session.isCreator" shadow="never" class="v2-card block">
       <h2 class="section">创建者维护</h2>
       <el-form label-position="top">
         <el-form-item label="标题">
           <el-input v-model="title" />
+        </el-form-item>
+        <el-form-item label="优先级">
+          <el-select v-model="priority">
+            <el-option v-for="(label, value) in PRIORITY_LABELS" :key="value" :value="value" :label="label" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="截止日期">
+          <el-input v-model="dueDate" type="date" />
         </el-form-item>
         <el-form-item label="负责人">
           <el-select v-model="assigneeId" filterable allow-create default-first-option style="width: 100%">
@@ -142,7 +183,7 @@ onMounted(load)
             <el-option v-for="stage in stages" :key="stage.id" :label="stage.name" :value="stage.id" />
           </el-select>
         </el-form-item>
-        <el-button type="primary" @click="saveMeta">保存标题 / 负责人 / 阶段</el-button>
+        <el-button type="primary" @click="saveMeta">保存任务设置</el-button>
         <el-form-item label="纠正状态" style="margin-top: 16px">
           <el-select v-model="correctStatus" style="width: 200px">
             <el-option v-for="item in STATUS_OPTIONS" :key="item.value" :label="item.label" :value="item.value" />

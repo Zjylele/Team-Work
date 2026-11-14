@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import ThemeToggle from './ThemeToggle.vue'
 
 defineProps<{
   title: string
@@ -15,7 +14,6 @@ defineProps<{
         <div class="brand-name">Team Work</div>
         <div class="brand-tag">团队任务协作</div>
       </div>
-      <ThemeToggle class="auth-theme" />
     </header>
     <main class="auth-main">
       <article class="v2-card auth-card">
