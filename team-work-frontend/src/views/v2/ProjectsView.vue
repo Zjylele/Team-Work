@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Folder } from '@element-plus/icons-vue'
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -75,7 +76,8 @@ onMounted(load)
         @click="router.push(`/projects/${project.id}`)"
         @keydown.enter="router.push(`/projects/${project.id}`)"
       >
-        {{ project.name }}
+        <span class="project-icon"><el-icon><Folder /></el-icon></span>
+        <strong>{{ project.name }}</strong>
         <el-button
           v-if="session.isCreator"
           link
@@ -98,3 +100,10 @@ onMounted(load)
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.v2-grid-projects { grid-template-columns: repeat(auto-fill, minmax(min(100%, 238px), 1fr)); }
+.v2-project-tile { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 12px 14px; }
+.v2-project-tile strong { flex: 1; overflow-wrap: anywhere; }
+.project-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; background: #eaf1ff; border-radius: 7px; }
+</style>

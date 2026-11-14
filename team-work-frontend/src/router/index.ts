@@ -79,6 +79,16 @@ const router = createRouter({
           ),
         },
         {
+          path: 'calendar',
+          name: 'calendar',
+          component: () => import('../views/TaskCalendarView.vue'),
+        },
+        {
+          path: 'directory',
+          name: 'directory',
+          component: () => import('../views/DirectoryView.vue'),
+        },
+        {
           path: 'notifications',
           name: 'notifications',
           component: pickView(

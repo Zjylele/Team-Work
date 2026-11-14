@@ -148,6 +148,8 @@ async function removeTask() {
     </header>
     <p class="v2-subtitle">负责人 {{ task.assigneeName }}</p>
 
+    <div class="detail-layout">
+    <div>
     <div class="actions">
       <el-button v-if="isAssignee && task.status === 'TODO'" type="primary" @click="start">开始</el-button>
       <el-button v-if="isAssignee && task.status === 'DOING'" type="success" @click="complete">结束</el-button>
@@ -201,8 +203,10 @@ async function removeTask() {
       </el-button>
     </el-card>
 
-    <el-card shadow="never" class="v2-card block">
-      <h2 class="section">评论</h2>
+    </div>
+    <el-card shadow="never" class="v2-card block discussion">
+      <h2 class="section">评论 <span>{{ comments.length }}</span></h2>
+      <p v-if="!comments.length" class="empty-comments">暂无评论</p>
       <div v-for="item in comments" :key="item.id" class="comment">
         <div class="who">{{ item.authorName }} · {{ formatTime(item.createdAt) }}</div>
         <div>{{ item.content }}</div>
@@ -210,6 +214,7 @@ async function removeTask() {
       <el-input v-model="commentText" type="textarea" :rows="3" placeholder="发表评论" />
       <el-button style="margin-top: 8px" type="primary" @click="addComment">评论</el-button>
     </el-card>
+    </div>
   </div>
 </template>
 
@@ -240,4 +245,15 @@ async function removeTask() {
   color: var(--color-muted-foreground);
   margin-bottom: 4px;
 }
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+.discussion .section { border-bottom: 1px solid var(--color-border); padding-bottom: 12px; }
+.discussion .section span { margin-left: 8px; background: #edf0f6; padding: 2px 7px; border-radius: 10px; font-size: 12px; }
+.empty-comments { margin: 20px 0; font-size: 13px; }
+@media (max-width: 820px) { .detail-layout { grid-template-columns: minmax(0, 1fr); } }
 </style>
