@@ -17,9 +17,11 @@ const route = useRoute()
 const router = useRouter()
 const session = useSessionStore()
 const projectId = computed(() => Number(route.params.projectId))
+const projectName = ref('')
+const managingStages = ref(false)
 const stages = ref<Stage[]>([])
 const tasks = ref<Task[]>([])
-const mode = ref<'list' | 'board' | 'stage'>('list')
+const mode = ref<'list' | 'board' | 'stage'>('stage')
 const stageDialog = ref(false)
 const taskDialog = ref(false)
 const stageName = ref('')
@@ -64,8 +66,12 @@ function rememberFromTasks() {
 
 async function load() {
   try {
-    stages.value = await projectApi.stages(projectId.value)
-    tasks.value = await taskApi.list(projectId.value)
+    const id = projectId.value
+    const [projects, nextStages, nextTasks] = await Promise.all([projectApi.list(), projectApi.stages(id), taskApi.list(id)])
+    if (id !== projectId.value) return
+    projectName.value = projects.find((project) => project.id === id)?.name ?? ''
+    stages.value = nextStages
+    tasks.value = nextTasks
     rememberFromTasks()
   } catch (error) {
     ElMessage.error(error instanceof ApiError ? error.message : '无法加载项目')
@@ -110,13 +116,13 @@ async function removeStage(stage: Stage) {
   }
 }
 
-function openTaskDialog() {
+function openTaskDialog(stageId = stages.value[0]?.id) {
   taskForm.title = ''
   taskForm.priority = 'NONE'
   taskForm.dueDate = ''
   taskForm.description = ''
   taskForm.assigneeId = session.account?.id
-  taskForm.stageId = stages.value[0]?.id
+  taskForm.stageId = stageId
   taskForm.assigneeInput = ''
   taskDialog.value = true
 }
@@ -179,7 +185,7 @@ async function removeProject() {
     </div>
     <header class="v2-page-header">
       <div>
-        <h1 class="v2-title">项目详情</h1>
+        <h1 class="v2-title">{{ projectName || '项目详情' }}</h1>
       </div>
       <div class="actions">
         <el-button @click="router.push({ name: 'project-planning', params: { projectId } })">周期与模块</el-button>
@@ -191,7 +197,8 @@ async function removeProject() {
         </el-radio-group>
         <el-button v-if="session.isCreator" type="danger" plain :loading="deleting" @click="removeProject">删除项目</el-button>
         <el-button v-if="session.isCreator" @click="stageDialog = true">添加阶段</el-button>
-        <el-button v-if="session.isCreator" type="primary" @click="openTaskDialog">新建任务</el-button>
+        <el-button v-if="session.isCreator && stages.length" :aria-expanded="managingStages" @click="managingStages = !managingStages">管理阶段</el-button>
+        <el-button v-if="session.isCreator" type="primary" @click="openTaskDialog()">新建任务</el-button>
       </div>
     </header>
 
@@ -210,7 +217,7 @@ async function removeProject() {
       <el-button :disabled="!hasSelectedFilter" @click="removeFilter">移除所选视图</el-button>
     </div>
 
-    <div v-if="session.isCreator" class="stages v2-card" style="padding: 12px; margin-bottom: 16px">
+    <div v-if="session.isCreator && managingStages" class="stages v2-card" style="padding: 12px; margin-bottom: 16px">
       <div v-for="stage in stages" :key="stage.id" class="stage-row">
         <el-input v-model="stage.name" size="small" @change="renameStage(stage)" />
         <el-button size="small" @click="moveStage(stage, -1)">上移</el-button>
@@ -245,23 +252,32 @@ async function removeProject() {
       </el-table>
     </div>
 
-    <div v-else class="board">
-      <div v-for="column in boardColumns" :key="column.value" class="col v2-card">
-        <div class="col-title">{{ column.label }} · {{ column.tasks.length }}</div>
+    <div v-else class="board" aria-label="任务看板">
+      <div v-for="column in boardColumns" :key="column.value" class="col">
+        <div class="col-title"><span>{{ column.label }}</span><span class="count">{{ column.tasks.length }}</span></div>
         <button
           v-for="task in column.tasks"
           :key="task.id"
           type="button"
           class="task-card"
+          :data-status="task.status"
           @click="router.push(`/tasks/${task.id}`)"
         >
-          <div>{{ task.title }}</div>
+          <strong>{{ task.title }}</strong>
           <div class="meta">
             <span>{{ task.assigneeName }} · {{ PRIORITY_LABELS[task.priority] }}<template v-if="task.dueDate"> · {{ task.dueDate }}</template></span>
             <el-tag :type="statusType(task.status)" size="small">{{ statusLabel(task.status) }}</el-tag>
           </div>
         </button>
+        <el-button
+          v-if="mode === 'stage' && session.isCreator"
+          text
+          class="add-task"
+          @click="openTaskDialog(Number(column.value))"
+        >＋ 添加任务</el-button>
+        <p v-else-if="!column.tasks.length" class="column-empty">暂无任务</p>
       </div>
+      <p v-if="!boardColumns.length" class="column-empty">暂无阶段</p>
     </div>
 
     <el-dialog v-model="stageDialog" title="添加阶段" width="360px">
@@ -384,4 +400,38 @@ async function removeProject() {
   color: var(--color-muted-foreground);
   font-size: 12px;
 }
+
+.v2-page { max-width: none; }
+.v2-page-header { align-items: center; }
+.task-filters {
+  background: white;
+  padding: 12px;
+  margin-bottom: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px 8px 0 0;
+}
+.board {
+  gap: 0;
+  min-height: 420px;
+  background: #f3f5f8;
+  border: 1px solid var(--color-border);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+}
+.col {
+  flex: 1 0 264px;
+  min-width: 0;
+  max-width: 360px;
+  border-right: 1px solid var(--color-border);
+}
+.col-title { display: flex; align-items: center; justify-content: space-between; padding: 4px 0 12px; border-bottom: 1px solid var(--color-border); }
+.count { background: #e5eaf2; border-radius: 10px; padding: 2px 7px; }
+.task-card { background: white; border-radius: 6px; padding: 12px; border-left: 3px solid #95a1b4; }
+.task-card[data-status='DOING'] { border-left-color: #e5a23d; }
+.task-card[data-status='DONE'] { border-left-color: #53ae88; }
+.task-card strong { display: block; overflow-wrap: anywhere; }
+.meta { gap: 8px; align-items: center; flex-wrap: wrap; }
+.meta :deep(.el-tag) { border-radius: 12px; }
+.add-task { width: 100%; justify-content: flex-start; }
+.column-empty { padding: 10px; font-size: 13px; }
 </style>

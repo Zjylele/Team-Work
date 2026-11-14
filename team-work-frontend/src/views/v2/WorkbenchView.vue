@@ -1,23 +1,30 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { workbenchApi } from '../../api/client'
-import { ApiError } from '../../api/http'
-import type { Workbench } from '../../api/types'
+import { Bell, Calendar, Collection, Folder, Refresh } from '@element-plus/icons-vue'
+import { projectApi, workbenchApi } from '../../api/client'
+import type { Project, Workbench } from '../../api/types'
 import { formatTime, statusLabel, statusType } from '../../utils/status'
 
-const router = useRouter()
 const data = ref<Workbench | null>(null)
+const projects = ref<Project[]>([])
+const loading = ref(false)
+const tasks = computed(() => data.value?.openTasks ?? [])
+const projectNames = computed(() => new Map(projects.value.map(({ id, name }) => [id, name])))
+const deadlines = computed(() => tasks.value.filter((task) => task.dueDate)
+  .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 6))
 
-const openCount = computed(() => data.value?.openTasks.length ?? 0)
-const doingCount = computed(() => data.value?.openTasks.filter((t) => t.status === 'DOING').length ?? 0)
-const todoCount = computed(() => data.value?.openTasks.filter((t) => t.status === 'TODO').length ?? 0)
 async function load() {
+  if (loading.value) return
+  loading.value = true
   try {
-    data.value = await workbenchApi.get()
+    const [workbench, teamProjects] = await Promise.all([workbenchApi.get(), projectApi.list()])
+    data.value = workbench
+    projects.value = teamProjects
   } catch (error) {
-    ElMessage.error(error instanceof ApiError ? error.message : '工作台加载失败')
+    ElMessage.error(error instanceof Error ? error.message : '工作台加载失败')
+  } finally {
+    loading.value = false
   }
 }
 
@@ -25,102 +32,99 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="v2-page">
-    <header class="v2-page-header">
+  <section class="dashboard">
+    <header class="dashboard-bar">
       <div>
-        <h1 class="v2-title">工作台</h1>
-        <p class="v2-subtitle">跟进你负责的任务和最近的团队动态。</p>
+        <h1>工作台</h1>
+        <p>查看团队项目、我的任务和最新动态</p>
       </div>
-      <el-button type="primary" @click="router.push('/projects')">浏览项目</el-button>
+      <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
     </header>
-
-    <section class="workspace-metrics" aria-label="工作台概览">
-      <article class="v2-card v2-stat">
-        <div class="v2-stat__label">我的未完成任务</div>
-        <div class="v2-stat__value">{{ data ? openCount : '—' }}</div>
-        <p>{{ todoCount }} 项待开始 · {{ doingCount }} 项进行中</p>
-      </article>
-      <article class="v2-card v2-stat">
-        <div class="v2-stat__label">进行中的项目</div>
-        <div class="v2-stat__value">{{ data?.inProgressProjectCount ?? '—' }}</div>
-        <p>包含进行中任务的项目</p>
-      </article>
-    </section>
-
-    <section class="workspace-panels">
-      <article class="v2-card v2-table-panel">
-        <h2>我的任务</h2>
-        <el-table :data="data?.openTasks || []" empty-text="没有未完成的负责任务">
-          <el-table-column prop="title" label="标题" min-width="160" />
-          <el-table-column label="状态" width="120">
-            <template #default="{ row }">
-              <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="" width="90">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="router.push(`/tasks/${row.id}`)">打开</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </article>
-      <article class="v2-card activity-panel">
-        <div class="activity-heading">
-          <h2>最近通知</h2>
-          <el-button link @click="router.push('/notifications')">查看全部</el-button>
+    <div v-loading="loading" class="dashboard-grid">
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon blue"><el-icon><Folder /></el-icon></span>
+          <div><h2>团队项目</h2><p>{{ projects.length }} 个项目 · {{ data?.inProgressProjectCount ?? 0 }} 个进行中</p></div>
+          <RouterLink to="/projects">查看全部</RouterLink>
+        </header>
+        <div v-if="projects.length" class="panel-rows">
+          <RouterLink v-for="project in projects" :key="project.id" class="panel-row" :to="'/projects/' + project.id">
+            <el-icon><Folder /></el-icon><span>{{ project.name }}</span>
+          </RouterLink>
         </div>
-        <ul v-if="data?.recentNotifications.length" class="bento-timeline">
-          <li v-for="item in data.recentNotifications" :key="item.id">
-            {{ item.summary }}
-            <time>{{ formatTime(item.createdAt) }}</time>
-          </li>
-        </ul>
-        <p v-else class="v2-empty">暂无通知</p>
+        <p v-else class="dashboard-empty"><el-icon><Folder /></el-icon>暂无项目</p>
       </article>
-    </section>
-  </div>
+
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon green"><el-icon><Collection /></el-icon></span>
+          <div><h2>我负责的任务</h2><p>{{ tasks.length }} 项未完成</p></div>
+        </header>
+        <div v-if="tasks.length" class="panel-rows">
+          <RouterLink v-for="task in tasks" :key="task.id" class="panel-row" :to="'/tasks/' + task.id">
+            <span>{{ task.title }}</span>
+            <el-tag size="small" round :type="statusType(task.status)">{{ statusLabel(task.status) }}</el-tag>
+          </RouterLink>
+        </div>
+        <p v-else class="dashboard-empty"><el-icon><Collection /></el-icon>没有未完成的负责任务</p>
+      </article>
+
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon amber"><el-icon><Calendar /></el-icon></span>
+          <div><h2>任务截止日期</h2><p>按截止时间排序</p></div>
+        </header>
+        <div v-if="deadlines.length" class="panel-rows">
+          <RouterLink v-for="task in deadlines" :key="task.id" class="panel-row" :to="'/tasks/' + task.id">
+            <span>{{ task.title }}<small v-if="projectNames.has(task.projectId)">{{ projectNames.get(task.projectId) }}</small></span>
+            <time>{{ task.dueDate }}</time>
+          </RouterLink>
+        </div>
+        <p v-else class="dashboard-empty"><el-icon><Calendar /></el-icon>暂无设定截止日期的未完成任务</p>
+      </article>
+
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon violet"><el-icon><Bell /></el-icon></span>
+          <div><h2>最近通知</h2><p>{{ data?.recentNotifications.length ?? 0 }} 条动态</p></div>
+          <RouterLink to="/notifications">查看全部</RouterLink>
+        </header>
+        <div v-if="data?.recentNotifications.length" class="panel-rows">
+          <RouterLink v-for="item in data.recentNotifications" :key="item.id" class="panel-row" :to="'/tasks/' + item.taskId">
+            <span>{{ item.summary }}</span><time>{{ formatTime(item.createdAt) }}</time>
+          </RouterLink>
+        </div>
+        <p v-else class="dashboard-empty"><el-icon><Bell /></el-icon>暂无通知</p>
+      </article>
+    </div>
+  </section>
 </template>
 
 <style scoped>
-.workspace-metrics,
-.workspace-panels {
-  display: grid;
-  gap: 16px;
-}
-.workspace-metrics {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-bottom: 24px;
-}
-.workspace-panels {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  align-items: start;
-}
-.workspace-panels h2 {
-  margin: 0;
-  font-size: 16px;
-}
-.v2-table-panel > h2,
-.activity-panel {
-  padding: 16px 20px;
-}
-.v2-stat p {
-  margin: 12px 0 0;
-  font-size: 13px;
-}
-.activity-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-@media (max-width: 840px) {
-  .workspace-panels {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-@media (max-width: 480px) {
-  .workspace-metrics {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.dashboard { max-width: 1680px; margin: 0 auto; }
+.dashboard-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.dashboard-bar h1 { font-size: 23px; font-weight: 650; margin: 0 0 4px; }
+.dashboard-bar p, .dashboard-panel header p { margin: 0; font-size: 12px; }
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dashboard-panel { min-height: 246px; background: white; border: 1px solid #e4e8ef; border-radius: 8px; overflow: hidden; }
+.dashboard-panel header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #edf0f4; }
+.dashboard-panel h2 { margin: 0 0 3px; font-size: 14px; font-weight: 650; }
+.dashboard-panel header a { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.panel-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; font-size: 17px; }
+.blue { background: #eaf1ff; }
+.green { background: #e6f6ed; }
+.amber { background: #fff1d8; }
+.violet { background: #f1ebff; }
+.panel-rows { max-height: 260px; overflow: auto; }
+.panel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; min-height: 43px; box-sizing: border-box; border-bottom: 1px solid #f0f2f5; font-size: 13px; }
+.panel-row:hover { background: #f1f6ff; }
+.panel-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.panel-row > .el-tag { flex: none; }
+.panel-row time { flex: none; font-size: 11px; }
+.panel-row small { display: block; margin-top: 3px; font-size: 11px; }
+.dashboard-empty { min-height: 170px; margin: 0; display: grid; align-content: center; justify-items: center; gap: 10px; text-align: center; font-size: 13px; }
+.dashboard-empty .el-icon { padding: 10px; font-size: 20px; border-radius: 10px; background: #f1f5fb; }
+@media (max-width: 860px) {
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

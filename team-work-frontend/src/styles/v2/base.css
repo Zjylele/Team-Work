@@ -1,5 +1,5 @@
 [data-ui-v2] .v2-page {
-  max-width: 1120px;
+  max-width: none;
 }
 
 [data-ui-v2] .v2-page--wide {
@@ -180,7 +180,7 @@
 
 [data-ui-v2] .v2-title {
   margin: 0;
-  font-size: clamp(1.5rem, 2.8vw, 2rem);
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
