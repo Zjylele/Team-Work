@@ -1,25 +1,13 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
+import { APP_NAV_ITEMS, useAppNavActive } from '../composables/useAppNav'
 import { useSessionStore } from '../stores/session'
 
 const session = useSessionStore()
-const route = useRoute()
 const router = useRouter()
 
-const items = [
-  { path: '/', label: '工作台' },
-  { path: '/projects', label: '项目' },
-  { path: '/notifications', label: '通知' },
-  { path: '/settings', label: '个人设置' },
-]
-
-const active = computed(() => {
-  if (route.path.startsWith('/projects') || route.path.startsWith('/tasks')) return '/projects'
-  if (route.path.startsWith('/notifications')) return '/notifications'
-  if (route.path.startsWith('/settings')) return '/settings'
-  return '/'
-})
+const items = APP_NAV_ITEMS
+const active = useAppNavActive()
 
 async function logout() {
   await session.logout()

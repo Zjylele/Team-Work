@@ -26,6 +26,8 @@ export interface Stage {
   sortOrder: number
 }
 
+export type TaskPriority = "NONE" | "LOW" | "MEDIUM" | "HIGH" | "URGENT"
+
 export interface Task {
   id: number
   projectId: number
@@ -35,6 +37,8 @@ export interface Task {
   assigneeId: number
   assigneeName: string
   status: TaskStatus
+  priority: TaskPriority
+  dueDate: string | null
   createdAt: string
 }
 

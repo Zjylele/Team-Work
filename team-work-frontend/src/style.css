@@ -26,3 +26,31 @@ a {
 .el-button {
   --el-border-radius-base: 6px;
 }
+
+/* Keep text readable on the existing light surfaces in both UI versions. */
+:root body,
+:root body *:not(.workspace-sidebar, .workspace-sidebar *) {
+  color: #000 !important;
+}
+
+:root body input::placeholder,
+:root body textarea::placeholder {
+  color: #000;
+  opacity: 1;
+}
+
+:root body .el-button--primary,
+:root body .el-button--danger {
+  --el-button-bg-color: var(--el-color-primary-light-9);
+  --el-button-hover-bg-color: var(--el-color-primary-light-8);
+  --el-button-active-bg-color: var(--el-color-primary-light-7);
+}
+
+:root[data-ui-v2] {
+  --color-hero: linear-gradient(135deg, #e0e7ff, #c7d2fe);
+  --color-hero-sub: #e0e7ff;
+}
+
+.workspace-sidebar { color: #f5f7fc; }
+.workspace-sidebar button { color: inherit; }
+.workspace-sidebar .side-foot button:not(.icon-button) { color: #172235; }

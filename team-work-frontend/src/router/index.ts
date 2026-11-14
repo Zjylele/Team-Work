@@ -61,12 +61,32 @@ const router = createRouter({
           ),
         },
         {
+          path: 'projects/:projectId/pages',
+          name: 'project-pages',
+          component: () => import('../views/ProjectPagesView.vue'),
+        },
+        {
+          path: 'projects/:projectId/planning',
+          name: 'project-planning',
+          component: () => import('../views/PlanningView.vue'),
+        },
+        {
           path: 'tasks/:taskId',
           name: 'task',
           component: pickView(
             () => import('../views/TaskDetailView.vue'),
             () => import('../views/v2/TaskDetailView.vue'),
           ),
+        },
+        {
+          path: 'calendar',
+          name: 'calendar',
+          component: () => import('../views/TaskCalendarView.vue'),
+        },
+        {
+          path: 'directory',
+          name: 'directory',
+          component: () => import('../views/DirectoryView.vue'),
         },
         {
           path: 'notifications',

@@ -1,143 +1,130 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { workbenchApi } from '../../api/client'
-import { ApiError } from '../../api/http'
-import type { Workbench } from '../../api/types'
+import { Bell, Calendar, Collection, Folder, Refresh } from '@element-plus/icons-vue'
+import { projectApi, workbenchApi } from '../../api/client'
+import type { Project, Workbench } from '../../api/types'
 import { formatTime, statusLabel, statusType } from '../../utils/status'
 
-const router = useRouter()
 const data = ref<Workbench | null>(null)
-
-const openCount = computed(() => data.value?.openTasks.length ?? 0)
-const doingCount = computed(() => data.value?.openTasks.filter((t) => t.status === 'DOING').length ?? 0)
-const todoCount = computed(() => data.value?.openTasks.filter((t) => t.status === 'TODO').length ?? 0)
-const activeRate = computed(() => {
-  if (!openCount.value) return 0
-  return Math.round((doingCount.value / openCount.value) * 100)
-})
+const projects = ref<Project[]>([])
+const loading = ref(false)
+const tasks = computed(() => data.value?.openTasks ?? [])
+const projectNames = computed(() => new Map(projects.value.map(({ id, name }) => [id, name])))
+const deadlines = computed(() => tasks.value.filter((task) => task.dueDate)
+  .sort((a, b) => (a.dueDate ?? '').localeCompare(b.dueDate ?? '')).slice(0, 6))
 
 async function load() {
+  if (loading.value) return
+  loading.value = true
   try {
-    data.value = await workbenchApi.get()
+    const [workbench, teamProjects] = await Promise.all([workbenchApi.get(), projectApi.list()])
+    data.value = workbench
+    projects.value = teamProjects
   } catch (error) {
-    ElMessage.error(error instanceof ApiError ? error.message : '工作台加载失败')
+    ElMessage.error(error instanceof Error ? error.message : '工作台加载失败')
+  } finally {
+    loading.value = false
   }
-}
-
-function notifyQuick() {
-  ElMessage.info('周报导出可在后续版本接入')
 }
 
 onMounted(load)
 </script>
 
 <template>
-  <div class="v2-page v2-page--wide">
-    <header class="v2-page-header">
+  <section class="dashboard">
+    <header class="dashboard-bar">
       <div>
-        <h1 class="v2-title">工作台</h1>
-        <p class="v2-subtitle">Bento 信息丰富布局 · 你负责的任务与团队动态</p>
+        <h1>工作台</h1>
+        <p>查看团队项目、我的任务和最新动态</p>
       </div>
+      <el-button :icon="Refresh" :loading="loading" @click="load">刷新</el-button>
     </header>
-
-    <section class="bento-grid v2-stagger" aria-label="工作台概览">
-      <article class="v2-card bento-tile bento-tile--hero bento-span-5 bento-row-2">
-        <div class="bento-label">我负责且未完成</div>
-        <div class="bento-value">{{ openCount || '—' }}</div>
-        <div v-if="openCount" class="bento-chips">
-          <span v-if="todoCount" class="bento-chip bento-chip--plain">{{ todoCount }} 项待办</span>
-          <span v-if="doingCount" class="bento-chip">{{ doingCount }} 项进行中</span>
+    <div v-loading="loading" class="dashboard-grid">
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon blue"><el-icon><Folder /></el-icon></span>
+          <div><h2>团队项目</h2><p>{{ projects.length }} 个项目 · {{ data?.inProgressProjectCount ?? 0 }} 个进行中</p></div>
+          <RouterLink to="/projects">查看全部</RouterLink>
+        </header>
+        <div v-if="projects.length" class="panel-rows">
+          <RouterLink v-for="project in projects" :key="project.id" class="panel-row" :to="'/projects/' + project.id">
+            <el-icon><Folder /></el-icon><span>{{ project.name }}</span>
+          </RouterLink>
         </div>
+        <p v-else class="dashboard-empty"><el-icon><Folder /></el-icon>暂无项目</p>
       </article>
 
-      <article class="v2-card bento-tile bento-span-3 bento-row-2">
-        <div class="bento-label">进行中占比（未完成任务内）</div>
-        <div style="display: flex; align-items: center; gap: 14px; margin-top: 10px">
-          <div class="bento-ring" :style="{ '--ring-pct': `${activeRate}%` }">{{ activeRate }}%</div>
-          <div>
-            <strong>共 {{ openCount }} 项未完结</strong>
-            <div class="bento-label">基于当前 API 实时计算</div>
-          </div>
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon green"><el-icon><Collection /></el-icon></span>
+          <div><h2>我负责的任务</h2><p>{{ tasks.length }} 项未完成</p></div>
+        </header>
+        <div v-if="tasks.length" class="panel-rows">
+          <RouterLink v-for="task in tasks" :key="task.id" class="panel-row" :to="'/tasks/' + task.id">
+            <span>{{ task.title }}</span>
+            <el-tag size="small" round :type="statusType(task.status)">{{ statusLabel(task.status) }}</el-tag>
+          </RouterLink>
         </div>
+        <p v-else class="dashboard-empty"><el-icon><Collection /></el-icon>没有未完成的负责任务</p>
       </article>
 
-      <article class="v2-card bento-tile bento-tile--sub bento-span-4">
-        <div class="bento-label">进行中的项目</div>
-        <div class="bento-value">{{ data?.inProgressProjectCount ?? '—' }}</div>
-        <el-button link style="color: #c7d2fe; margin-top: 8px; padding: 0" @click="router.push('/projects')">
-          查看项目列表
-        </el-button>
-      </article>
-
-      <article class="v2-card bento-tile bento-span-3">
-        <div class="bento-label">快捷操作</div>
-        <div class="bento-quick">
-          <el-button @click="router.push('/projects')">新建项目</el-button>
-          <el-button @click="router.push('/projects')">打开看板</el-button>
-          <el-button @click="router.push('/notifications')">通知中心</el-button>
-          <el-button @click="notifyQuick">导出周报</el-button>
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon amber"><el-icon><Calendar /></el-icon></span>
+          <div><h2>任务截止日期</h2><p>按截止时间排序</p></div>
+        </header>
+        <div v-if="deadlines.length" class="panel-rows">
+          <RouterLink v-for="task in deadlines" :key="task.id" class="panel-row" :to="'/tasks/' + task.id">
+            <span>{{ task.title }}<small v-if="projectNames.has(task.projectId)">{{ projectNames.get(task.projectId) }}</small></span>
+            <time>{{ task.dueDate }}</time>
+          </RouterLink>
         </div>
+        <p v-else class="dashboard-empty"><el-icon><Calendar /></el-icon>暂无设定截止日期的未完成任务</p>
       </article>
 
-      <article class="v2-card bento-tile bento-span-12 v2-table-panel" style="padding: 12px 16px 4px">
-        <h2 class="v2-section-title" style="margin-top: 0">未完成任务</h2>
-        <el-table :data="data?.openTasks || []" empty-text="没有未完成的负责任务">
-          <el-table-column prop="title" label="标题" min-width="160" />
-          <el-table-column label="状态" width="120">
-            <template #default="{ row }">
-              <el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="" width="90">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="router.push(`/tasks/${row.id}`)">打开</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </article>
-
-      <article class="v2-card bento-tile bento-span-5">
-        <h2 class="v2-section-title" style="margin-top: 0">最近通知</h2>
-        <ul v-if="data?.recentNotifications.length" class="bento-timeline">
-          <li v-for="item in data.recentNotifications" :key="item.id">
-            {{ item.summary }}
-            <time>{{ formatTime(item.createdAt) }}</time>
-          </li>
-        </ul>
-        <p v-else class="v2-empty" style="padding: 12px 0">暂无通知</p>
-      </article>
-
-      <article class="v2-card bento-tile bento-span-7">
-        <h2 class="v2-section-title" style="margin-top: 0">项目概况</h2>
-        <p class="bento-label" style="margin-bottom: 12px">
-          当前有 {{ data?.inProgressProjectCount ?? 0 }} 个项目处于进行中，可进入项目页查看阶段与看板。
-        </p>
-        <div style="display: flex; gap: 12px; flex-wrap: wrap">
-          <div class="bento-prog">
-            <div class="bento-label">任务处理进度（示意）</div>
-            <div class="bento-prog-track">
-              <div class="bento-prog-fill" :style="{ width: `${activeRate || 0}%` }" />
-            </div>
-            <div class="bento-label">进行中任务占未完结 {{ activeRate }}%</div>
-          </div>
-          <div class="bento-prog">
-            <div class="bento-label">项目活跃度</div>
-            <div class="bento-prog-track">
-              <div
-                class="bento-prog-fill"
-                :style="{
-                  width: `${Math.min(100, (data?.inProgressProjectCount ?? 0) * 35)}%`,
-                  background: 'var(--color-accent)',
-                }"
-              />
-            </div>
-            <div class="bento-label">{{ data?.inProgressProjectCount ?? 0 }} 个进行中的项目</div>
-          </div>
+      <article class="dashboard-panel">
+        <header>
+          <span class="panel-icon violet"><el-icon><Bell /></el-icon></span>
+          <div><h2>最近通知</h2><p>{{ data?.recentNotifications.length ?? 0 }} 条动态</p></div>
+          <RouterLink to="/notifications">查看全部</RouterLink>
+        </header>
+        <div v-if="data?.recentNotifications.length" class="panel-rows">
+          <RouterLink v-for="item in data.recentNotifications" :key="item.id" class="panel-row" :to="'/tasks/' + item.taskId">
+            <span>{{ item.summary }}</span><time>{{ formatTime(item.createdAt) }}</time>
+          </RouterLink>
         </div>
-        <el-button type="primary" style="margin-top: 14px" @click="router.push('/projects')">前往项目</el-button>
+        <p v-else class="dashboard-empty"><el-icon><Bell /></el-icon>暂无通知</p>
       </article>
-    </section>
-  </div>
+    </div>
+  </section>
 </template>
+
+<style scoped>
+.dashboard { max-width: 1680px; margin: 0 auto; }
+.dashboard-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.dashboard-bar h1 { font-size: 23px; font-weight: 650; margin: 0 0 4px; }
+.dashboard-bar p, .dashboard-panel header p { margin: 0; font-size: 12px; }
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.dashboard-panel { min-height: 246px; background: white; border: 1px solid #e4e8ef; border-radius: 8px; overflow: hidden; }
+.dashboard-panel header { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid #edf0f4; }
+.dashboard-panel h2 { margin: 0 0 3px; font-size: 14px; font-weight: 650; }
+.dashboard-panel header a { margin-left: auto; font-size: 12px; white-space: nowrap; }
+.panel-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; font-size: 17px; }
+.blue { background: #eaf1ff; }
+.green { background: #e6f6ed; }
+.amber { background: #fff1d8; }
+.violet { background: #f1ebff; }
+.panel-rows { max-height: 260px; overflow: auto; }
+.panel-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 16px; min-height: 43px; box-sizing: border-box; border-bottom: 1px solid #f0f2f5; font-size: 13px; }
+.panel-row:hover { background: #f1f6ff; }
+.panel-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.panel-row > .el-tag { flex: none; }
+.panel-row time { flex: none; font-size: 11px; }
+.panel-row small { display: block; margin-top: 3px; font-size: 11px; }
+.dashboard-empty { min-height: 170px; margin: 0; display: grid; align-content: center; justify-items: center; gap: 10px; text-align: center; font-size: 13px; }
+.dashboard-empty .el-icon { padding: 10px; font-size: 20px; border-radius: 10px; background: #f1f5fb; }
+@media (max-width: 860px) {
+  .dashboard-grid { grid-template-columns: minmax(0, 1fr); }
+}
+</style>

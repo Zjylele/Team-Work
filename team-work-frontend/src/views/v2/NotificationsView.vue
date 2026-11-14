@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { notificationApi } from '../../api/client'
@@ -9,6 +9,12 @@ import { formatTime } from '../../utils/status'
 
 const router = useRouter()
 const list = ref<Notification[]>([])
+const filter = ref('all')
+const search = ref('')
+const visible = computed(() => list.value.filter(item =>
+  (filter.value === 'all' || !item.read) &&
+  item.summary.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()),
+))
 
 async function load() {
   try {
@@ -49,7 +55,15 @@ onMounted(load)
       <el-button @click="readAll">全部标为已读</el-button>
     </header>
     <div class="v2-table-panel">
-      <el-table :data="list" empty-text="暂无通知">
+      <div class="inbox-toolbar">
+        <el-radio-group v-model="filter" size="small">
+          <el-radio-button value="all">全部</el-radio-button>
+          <el-radio-button value="unread">未读</el-radio-button>
+        </el-radio-group>
+        <el-input v-model="search" placeholder="搜索通知内容" aria-label="搜索通知内容" clearable />
+        <span>{{ visible.length }} 条通知</span>
+      </div>
+      <el-table :data="visible" empty-text="暂无符合条件的通知">
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.read ? 'info' : 'danger'" size="small">{{ row.read ? '已读' : '未读' }}</el-tag>
@@ -68,3 +82,8 @@ onMounted(load)
     </div>
   </div>
 </template>
+
+<style scoped>
+.inbox-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px; border-bottom: 1px solid var(--color-border); font-size: 13px; }
+.inbox-toolbar .el-input { width: min(230px, 100%); }
+</style>

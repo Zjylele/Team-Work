@@ -17,7 +17,9 @@ import com.teamwork.backend.team.TeamService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -63,8 +65,14 @@ public class TaskService {
     }
 
     @Transactional
+    public void delete(TeamMember creator, Long taskId) {
+        requireTask(creator, taskId);
+        tasks.deleteById(taskId);
+    }
+
+    @Transactional
     public TaskView create(TeamMember creator, Long projectId, String title, String description,
-                           Long assigneeId, Long stageId) {
+                           Long assigneeId, Long stageId, String priority, String dueDate) {
         Project project = projectService.requireInTeam(projectId, creator.getTeamId());
         Stage stage = projectService.requireStage(creator, stageId);
         if (!stage.getProjectId().equals(project.getId())) {
@@ -78,6 +86,8 @@ public class TaskService {
         task.setDescription(description == null ? "" : description);
         task.setAssigneeId(assigneeId);
         task.setStatus(TaskItem.TODO);
+        task.setPriority("NONE");
+        applyPlanning(task, priority, dueDate);
         task.setCreatedAt(LocalDateTime.now());
         tasks.insert(task);
         notificationService.notify(assigneeId, creator.getAccountId(), task.getId(), Notification.TASK_ASSIGNED);
@@ -86,13 +96,13 @@ public class TaskService {
 
     @Transactional
     public TaskView update(TeamMember actor, Long taskId, String title, String description,
-                           Long assigneeId, Long stageId) {
+                           Long assigneeId, Long stageId, String priority, String dueDate) {
         TaskItem task = requireTask(actor, taskId);
         if (!TeamMember.CREATOR.equals(actor.getRole())) {
             if (!task.getAssigneeId().equals(actor.getAccountId())) {
                 throw new ApiException(403, "只能补充自己负责任务的说明");
             }
-            if (title != null || assigneeId != null || stageId != null) {
+            if (title != null || assigneeId != null || stageId != null || priority != null || dueDate != null) {
                 throw new ApiException(403, "成员不能修改标题、负责人或阶段");
             }
             if (description == null) {
@@ -124,6 +134,7 @@ public class TaskService {
             }
             task.setStageId(stage.getId());
         }
+        applyPlanning(task, priority, dueDate);
         Long previousAssignee = task.getAssigneeId();
         if (assigneeId != null) {
             requireAssignee(actor.getTeamId(), assigneeId);
@@ -291,6 +302,22 @@ public class TaskService {
         return accounts.selectByIds(ids).stream().collect(Collectors.toMap(Account::getId, Function.identity()));
     }
 
+    private void applyPlanning(TaskItem task, String priority, String dueDate) {
+        if (priority != null) {
+            switch (priority) {
+                case "NONE", "LOW", "MEDIUM", "HIGH", "URGENT" -> task.setPriority(priority);
+                default -> throw new ApiException(400, "无效的优先级");
+            }
+        }
+        if (dueDate != null) {
+            try {
+                task.setDueDate(dueDate.isEmpty() ? null : LocalDate.parse(dueDate));
+            } catch (DateTimeParseException exception) {
+                throw new ApiException(400, "截止日期格式应为 YYYY-MM-DD");
+            }
+        }
+    }
+
     public record TaskView(
             Long id,
             Long projectId,
@@ -300,12 +327,14 @@ public class TaskService {
             Long assigneeId,
             String assigneeName,
             String status,
+            String priority,
+            LocalDate dueDate,
             LocalDateTime createdAt
     ) {
         static TaskView from(TaskItem task, Account assignee) {
             return new TaskView(task.getId(), task.getProjectId(), task.getStageId(), task.getTitle(),
                     task.getDescription(), task.getAssigneeId(),
-                    assignee == null ? "" : assignee.getDisplayName(), task.getStatus(), task.getCreatedAt());
+                    assignee == null ? "" : assignee.getDisplayName(), task.getStatus(), task.getPriority(), task.getDueDate(), task.getCreatedAt());
         }
     }
 

@@ -37,6 +37,17 @@ public class ProjectController {
         return projectService.create(currentAccount.requireCreator(), request.name());
     }
 
+    @PatchMapping("/api/projects/{projectId}")
+    public ProjectService.ProjectView rename(@PathVariable Long projectId, @Valid @RequestBody NameRequest request) {
+        return projectService.rename(currentAccount.requireCreator(), projectId, request.name().strip());
+    }
+
+    @DeleteMapping("/api/projects/{projectId}")
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable Long projectId) {
+        projectService.delete(currentAccount.requireCreator(), projectId);
+    }
+
     @GetMapping("/api/projects/{projectId}/stages")
     public List<ProjectService.StageView> stages(@PathVariable Long projectId) {
         TeamMember member = currentAccount.requireMember();

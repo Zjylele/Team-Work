@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { Folder } from '@element-plus/icons-vue'
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { projectApi } from '../../api/client'
 import { ApiError } from '../../api/http'
 import type { Project } from '../../api/types'
@@ -33,6 +34,25 @@ async function create() {
   }
 }
 
+async function rename(project: Project) {
+  try {
+    const { value } = await ElMessageBox.prompt('输入新的项目名称', '重命名项目', {
+      inputValue: project.name,
+      inputValidator: (value) => value.trim().length > 0 && value.trim().length <= 64,
+      inputErrorMessage: '请输入 1–64 个字符',
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+    })
+    const updated = await projectApi.rename(project.id, value.trim())
+    projects.value = projects.value.map((item) => item.id === updated.id ? updated : item)
+    ElMessage.success('项目名称已更新')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error instanceof ApiError ? error.message : '重命名失败')
+    }
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -56,7 +76,17 @@ onMounted(load)
         @click="router.push(`/projects/${project.id}`)"
         @keydown.enter="router.push(`/projects/${project.id}`)"
       >
-        {{ project.name }}
+        <span class="project-icon"><el-icon><Folder /></el-icon></span>
+        <strong>{{ project.name }}</strong>
+        <el-button
+          v-if="session.isCreator"
+          link
+          aria-label="重命名项目"
+          @click.stop="rename(project)"
+          @keydown.enter.stop
+        >
+          重命名
+        </el-button>
       </div>
     </div>
     <div v-else class="v2-empty">还没有项目</div>
@@ -70,3 +100,10 @@ onMounted(load)
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.v2-grid-projects { grid-template-columns: repeat(auto-fill, minmax(min(100%, 238px), 1fr)); }
+.v2-project-tile { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 12px 14px; }
+.v2-project-tile strong { flex: 1; overflow-wrap: anywhere; }
+.project-icon { display: grid; place-items: center; flex: 0 0 34px; height: 34px; background: #eaf1ff; border-radius: 7px; }
+</style>

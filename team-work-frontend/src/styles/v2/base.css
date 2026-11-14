@@ -1,5 +1,5 @@
 [data-ui-v2] .v2-page {
-  max-width: 1120px;
+  max-width: none;
 }
 
 [data-ui-v2] .v2-page--wide {
@@ -175,12 +175,12 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 [data-ui-v2] .v2-title {
   margin: 0;
-  font-size: clamp(1.25rem, 2vw, 1.5rem);
+  font-size: clamp(1.25rem, 2vw, 1.65rem);
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -307,4 +307,24 @@
 
 [data-ui-v2] a.router-link-active {
   font-weight: inherit;
+}
+
+[data-ui-v2] .el-table {
+  --el-table-header-bg-color: #f7f8fa;
+  --el-table-row-hover-bg-color: #f7f6fd;
+}
+[data-ui-v2] .el-dialog,
+[data-ui-v2] .el-message-box {
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgb(18 22 39 / 14%);
+}
+[data-ui-v2] .el-button {
+  font-weight: 550;
+}
+[data-ui-v2] .v2-page-header .actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+[data-ui-v2] .v2-page-header .actions .el-button + .el-button {
+  margin-left: 0;
 }
