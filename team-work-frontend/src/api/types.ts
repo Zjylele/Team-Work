@@ -1,5 +1,5 @@
 export type Role = 'CREATOR' | 'MEMBER'
-export type TaskStatus = 'TODO' | 'DOING' | 'DONE'
+export type TaskStatus = 'TODO' | 'DOING' | 'REVIEW' | 'DONE'
 
 export interface Account {
   id: number
@@ -17,7 +17,14 @@ export interface Team {
 export interface Project {
   id: number
   name: string
+  visibility?: 'SHARED' | 'PRIVATE'
+  role?: 'OWNER' | 'ADMIN' | 'MEMBER' | 'VIEWER'
 }
+
+export interface ProjectView { id: number; name: string; scope: 'PERSONAL' | 'SHARED'; configJson: string; ownerId: number }
+export interface ProjectTemplate { id: number; name: string; description?: string }
+export interface ProjectField { id: number; name: string; type: 'TEXT' | 'SINGLE_SELECT' | 'DATE'; options: { id: number; label: string }[]; required: boolean; visible: boolean; sortOrder: number }
+export interface ProjectMember { accountId: number; displayName: string; role: 'OWNER'|'ADMIN'|'MEMBER'|'VIEWER' }
 
 export interface Stage {
   id: number
@@ -38,6 +45,7 @@ export interface Task {
   assigneeName: string
   status: TaskStatus
   priority: TaskPriority
+  startDate: string | null
   dueDate: string | null
   createdAt: string
 }
@@ -48,6 +56,17 @@ export interface Comment {
   authorId: number
   authorName: string
   content: string
+  createdAt: string
+}
+
+export interface TaskActivity {
+  id: number
+  taskId: number
+  actorId: number
+  actorName: string
+  action: string
+  beforeValue: string | null
+  afterValue: string | null
   createdAt: string
 }
 

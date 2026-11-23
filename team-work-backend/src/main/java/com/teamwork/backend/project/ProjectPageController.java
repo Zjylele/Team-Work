@@ -26,14 +26,14 @@ public class ProjectPageController {
 
     @GetMapping
     public List<ProjectPage> list(@PathVariable Long projectId) {
-        projects.requireInTeam(projectId, account.requireMember().getTeamId());
+        projects.requireAccessible(projectId, account.requireMember());
         return pages.selectList(Wrappers.lambdaQuery(ProjectPage.class)
                 .eq(ProjectPage::getProjectId, projectId).orderByAsc(ProjectPage::getId));
     }
 
     @PostMapping
     public ProjectPage create(@PathVariable Long projectId, @Valid @RequestBody PageRequest body) {
-        projects.requireInTeam(projectId, account.requireCreator().getTeamId());
+        projects.requireWritable(projectId, account.requireCreator());
         ProjectPage page = new ProjectPage();
         page.setProjectId(projectId);
         page.setTitle(body.title().strip());
@@ -45,7 +45,7 @@ public class ProjectPageController {
     @PutMapping("/{pageId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void update(@PathVariable Long projectId, @PathVariable Long pageId, @Valid @RequestBody PageRequest body) {
-        projects.requireInTeam(projectId, account.requireCreator().getTeamId());
+        projects.requireWritable(projectId, account.requireCreator());
         if (pages.update(Wrappers.lambdaUpdate(ProjectPage.class)
                 .eq(ProjectPage::getId, pageId).eq(ProjectPage::getProjectId, projectId)
                 .set(ProjectPage::getTitle, body.title().strip()).set(ProjectPage::getContent, body.content())) == 0) {
@@ -56,7 +56,7 @@ public class ProjectPageController {
     @DeleteMapping("/{pageId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable Long projectId, @PathVariable Long pageId) {
-        projects.requireInTeam(projectId, account.requireCreator().getTeamId());
+        projects.requireWritable(projectId, account.requireCreator());
         if (pages.delete(Wrappers.lambdaQuery(ProjectPage.class)
                 .eq(ProjectPage::getId, pageId).eq(ProjectPage::getProjectId, projectId)) == 0) {
             throw new ApiException(404, "文档不存在");

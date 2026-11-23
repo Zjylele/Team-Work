@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
+import { get } from '../api/http'
+import { getCalendarContext } from '../api/calendarContext'
 import { Calendar, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { projectApi, taskApi } from '../api/client'
 import type { Task } from '../api/types'
 import { useSessionStore } from '../stores/session'
 
+type PlanEntry = { plan: { id: number; name: string; kind: string; startDate: string | null; endDate: string | null } }
+const plans = ref<(PlanEntry['plan'] & { projectId: number })[]>([])
+const route = useRoute()
+const projectId = computed(() => Number(route.query.projectId) || undefined)
 const session = useSessionStore()
 const tasks = ref<Task[]>([])
 const loading = ref(true)
 const failed = ref(false)
 const mode = ref<'month' | 'week' | 'day'>('month')
 const mine = ref(false)
-const today = new Date()
-const selected = ref(today)
+const today = ref('')
+const selected = ref(new Date(2000, 0, 1))
 const labels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const key = (date: Date) => [date.getFullYear(), date.getMonth() + 1, date.getDate()]
   .map((part, index) => String(part).padStart(index === 0 ? 4 : 2, '0')).join('-')
@@ -25,16 +32,36 @@ const monthDays = computed(() => {
 })
 const days = computed(() => mode.value === 'month' ? monthDays.value :
   mode.value === 'week' ? Array.from({ length: 7 }, (_, index) => shift(monday(selected.value), index)) : [selected.value])
+const plansByDate = computed(() => {
+  const map = new Map<string, typeof plans.value>()
+  if (mine.value) return map
+  for (const date of days.value) {
+    const day = key(date)
+    map.set(day, plans.value.filter(plan => {
+      const start = plan.startDate || plan.endDate
+      const end = plan.endDate || plan.startDate
+      return start && end && day >= start && day <= end
+    }))
+  }
+  return map
+})
 const title = computed(() => new Intl.DateTimeFormat('zh-CN', {
   year: 'numeric', month: 'long', ...(mode.value === 'month' ? {} : { day: 'numeric' }),
 }).format(mode.value === 'week' ? monday(selected.value) : selected.value))
 const byDate = computed(() => {
   const dates = new Map<string, Task[]>()
   for (const task of tasks.value) {
-    if (!task.dueDate || (mine.value && task.assigneeId !== session.account?.id)) continue
-    const group = dates.get(task.dueDate) ?? []
-    group.push(task)
-    dates.set(task.dueDate, group)
+    if (mine.value && task.assigneeId !== session.account?.id) continue
+    const start = task.startDate || task.dueDate
+    const end = task.dueDate || task.startDate
+    if (!start || !end) continue
+    for (const date of days.value) {
+      const day = key(date)
+      if (day < start || day > end) continue
+      const group = dates.get(day) ?? []
+      group.push(task)
+      dates.set(day, group)
+    }
   }
   return dates
 })
@@ -43,24 +70,48 @@ function move(direction: number) {
     ? new Date(month.value.getFullYear(), month.value.getMonth() + direction, 1)
     : shift(selected.value, direction * (mode.value === 'week' ? 7 : 1))
 }
+let version = 0
 async function load() {
+  const current = ++version
   loading.value = true
   failed.value = false
   try {
-    const projects = await projectApi.list()
-    tasks.value = (await Promise.all(projects.map((project) => taskApi.list(project.id)))).flat()
+    const [projects, context] = await Promise.all([projectApi.list(), getCalendarContext()])
+    const scoped = projects.filter(project => !projectId.value || project.id === projectId.value)
+    const [nextTasks, nextPlans] = await Promise.all([
+      Promise.all(scoped.map(project => taskApi.list(project.id))),
+      Promise.all(scoped.map(async project => {
+        const entries = await get<PlanEntry[]>('/api/projects/' + project.id + '/planning')
+        return entries.map(entry => ({ ...entry.plan, projectId: project.id }))
+      })),
+    ])
+    if (current === version) {
+      if (!today.value && !parseQueryDate(route.query.date)) selected.value = new Date(context.today + 'T00:00:00')
+      today.value = context.today
+      tasks.value = nextTasks.flat()
+      plans.value = nextPlans.flat()
+    }
   } catch {
-    failed.value = true
+    if (current === version) failed.value = true
   } finally {
-    loading.value = false
+    if (current === version) loading.value = false
   }
 }
-onMounted(load)
+watch(projectId, load, { immediate: true })
+function parseQueryDate(value: unknown) {
+  if (typeof value !== 'string' || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)) return
+  const date = new Date(value + 'T00:00:00')
+  if (!Number.isNaN(date.getTime()) && key(date) === value) return date
+}
+watch(() => route.query.date, (value) => {
+  const date = parseQueryDate(value)
+  if (date) selected.value = date
+}, { immediate: true })
 </script>
 
 <template>
   <section class="task-calendar">
-    <aside class="calendar-side">
+    <aside v-if="today" class="calendar-side">
       <h2>{{ month.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' }) }}</h2>
       <div class="mini-grid">
         <span v-for="label in labels" :key="label">{{ label.slice(1) }}</span>
@@ -77,9 +128,10 @@ onMounted(load)
     <div class="calendar-main">
       <header class="calendar-header">
         <h1><el-icon><Calendar /></el-icon> 任务日历</h1>
-        <el-button @click="selected = today">今天</el-button>
+        <RouterLink v-if="projectId" :to="{ name: 'calendar' }">查看全部项目</RouterLink>
+        <el-button v-if="today" @click="selected = new Date(today + 'T00:00:00')">今天</el-button>
       </header>
-      <div class="calendar-tools">
+      <div v-if="today" class="calendar-tools">
         <el-radio-group v-model="mode" size="small" aria-label="日历视图">
           <el-radio-button value="month">月</el-radio-button>
           <el-radio-button value="week">周</el-radio-button>
@@ -99,13 +151,16 @@ onMounted(load)
         <div class="calendar-grid" :class="'is-' + mode">
           <div v-for="label in mode === 'day' ? [] : labels" :key="label" class="calendar-weekday">{{ label }}</div>
           <article v-for="date in days" :key="key(date)" class="calendar-cell"
-            :class="{ current: key(date) === key(today), outside: mode === 'month' && date.getMonth() !== selected.getMonth() }">
+            :class="{ current: key(date) === today, outside: mode === 'month' && date.getMonth() !== selected.getMonth() }">
             <button type="button" class="day-label" :aria-label="'查看 ' + key(date)"
               @click="selected = date; mode = 'day'">{{ mode === 'day' ? key(date) : date.getDate() }}</button>
             <RouterLink v-for="task in byDate.get(key(date))" :key="task.id"
               :to="{ name: 'task', params: { taskId: task.id } }" class="calendar-task"
               :data-status="task.status" :title="task.title">{{ task.title }}</RouterLink>
-            <p v-if="mode === 'day' && !byDate.has(key(date))" class="calendar-feedback">当天没有到期任务</p>
+            <RouterLink v-for="plan in plansByDate.get(key(date))" :key="'plan-' + plan.id"
+              :to="{ name: 'project-planning', params: { projectId: plan.projectId }, query: { kind: plan.kind } }"
+              class="calendar-task plan" :title="plan.name">{{ plan.kind === 'MILESTONE' ? '里程碑' : plan.kind === 'CYCLE' ? '迭代' : '模块' }} · {{ plan.name }}</RouterLink>
+            <p v-if="mode === 'day' && !byDate.has(key(date)) && !plansByDate.get(key(date))?.length" class="calendar-feedback">当天没有排期任务</p>
           </article>
         </div>
       </div>
@@ -142,6 +197,7 @@ onMounted(load)
 .calendar-task { display: block; font-size: 12px; margin-top: 5px; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #82a7ec; background: #edf3ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-task[data-status='DOING'] { background: #fff3d8; border-color: #dfac4d; }
 .calendar-task[data-status='DONE'] { background: #e6f7ee; border-color: #74bd98; }
+.calendar-task.plan { background: #f3eaff; border-color: #ab83d1; }
 .calendar-feedback { padding: 14px; font-size: 13px; }
 @media (max-width: 800px) {
   .task-calendar { grid-template-columns: minmax(0, 1fr); }

@@ -111,7 +111,7 @@ watch(projectId, () => {
     <section v-else>
       <el-card shadow="never">
         <h2>任务概览</h2>
-        <p>共 {{ tasks.length }} 项任务，{{ tasks.filter(task => task.status === 'DOING').length }} 项进行中，{{ tasks.filter(task => task.status === 'DONE').length }} 项已完成。</p>
+        <p>共 {{ tasks.length }} 项任务，{{ tasks.filter(task => task.status === 'DOING').length }} 项进行中，{{ tasks.filter(task => task.status === 'REVIEW').length }} 项待验收，{{ tasks.filter(task => task.status === 'DONE').length }} 项已完成。</p>
       </el-card>
       <el-card shadow="never">
         <el-button v-if="session.isCreator" :disabled="editing || busy" type="primary" @click="edit()">新建文档</el-button>

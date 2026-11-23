@@ -1,0 +1,3 @@
+# Fill in your local MySQL credentials in db.local.properties.
+DB_USERNAME=
+DB_PASSWORD=

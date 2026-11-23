@@ -11,6 +11,7 @@ import { STATUS_OPTIONS, statusLabel, statusType } from '../../utils/status'
 import { PRIORITY_LABELS } from '../../utils/priority'
 import type { TaskPriority } from '../../api/types'
 
+import { getCalendarContext, isOverdue } from '../../api/calendarContext'
 import { useTaskFilters } from '../../utils/taskFilters'
 
 const route = useRoute()
@@ -18,9 +19,17 @@ const router = useRouter()
 const session = useSessionStore()
 const projectId = computed(() => Number(route.params.projectId))
 const projectName = ref('')
+const project = ref<{visibility?: 'SHARED'|'PRIVATE'; role?: string}>({})
+const sharedViews = ref<{id:number;name:string;scope:'PERSONAL'|'SHARED';configJson:string}[]>([])
+const projectFields = ref<{id:number;name:string;type:'TEXT'|'SINGLE_SELECT'|'DATE';required:boolean;visible:boolean;sortOrder:number}[]>([])
+const selectedServerView = ref<number | undefined>()
+const newFieldType = ref<'TEXT'|'SINGLE_SELECT'|'DATE'>('TEXT')
+const memberToAdd = ref<number>()
+const projectMembers = ref<{accountId:number;displayName:string;role:'OWNER'|'ADMIN'|'MEMBER'|'VIEWER'}[]>([])
 const managingStages = ref(false)
 const stages = ref<Stage[]>([])
 const tasks = ref<Task[]>([])
+const overdueOnly = ref(false)
 const mode = ref<'list' | 'board' | 'stage'>('stage')
 const stageDialog = ref(false)
 const taskDialog = ref(false)
@@ -28,6 +37,7 @@ const stageName = ref('')
 const taskForm = reactive({
   title: '',
   priority: 'NONE' as TaskPriority,
+  startDate: '',
   dueDate: '',
   description: '',
   assigneeId: undefined as number | undefined,
@@ -36,7 +46,7 @@ const taskForm = reactive({
 })
 
 const filterStorageKey = computed(() => 'team-work:task-views:' + session.account?.id + ':' + projectId.value)
-const { filters, savedFilters, selectedFilter, hasSelectedFilter, loadFilter, saveFilter, removeFilter } =
+const { filters } =
   useTaskFilters(filterStorageKey)
 const filteredTasks = computed(() => {
   const search = filters.search.trim().toLowerCase()
@@ -44,8 +54,28 @@ const filteredTasks = computed(() => {
     (!search || [task.title, task.assigneeName, task.description].some((text) => text?.toLowerCase().includes(search))) &&
     (!filters.status || task.status === filters.status) &&
     (!filters.priority || task.priority === filters.priority),
-  )
+  ).filter((task) => !overdueOnly.value || isOverdue(task, teamToday.value))
 })
+const statusCounts = computed(() => STATUS_OPTIONS.map((status) => ({
+  ...status,
+  count: tasks.value.filter((task) => task.status === status.value).length,
+})))
+const overdueCount = computed(() => tasks.value.filter((task) => isOverdue(task, teamToday.value)).length)
+function drillStatus(status: string) {
+  overdueOnly.value = false
+  filters.status = filters.status === status ? '' : status
+  filters.search = ''
+  filters.priority = ''
+  mode.value = 'list'
+}
+
+function drillOverdue() {
+  overdueOnly.value = !overdueOnly.value
+  filters.status = ''
+  filters.search = ''
+  filters.priority = ''
+  mode.value = 'list'
+}
 const boardColumns = computed(() => mode.value === 'stage'
   ? stages.value.map((stage) => ({
     value: stage.id,
@@ -69,7 +99,11 @@ async function load() {
     const id = projectId.value
     const [projects, nextStages, nextTasks] = await Promise.all([projectApi.list(), projectApi.stages(id), taskApi.list(id)])
     if (id !== projectId.value) return
-    projectName.value = projects.find((project) => project.id === id)?.name ?? ''
+    project.value = projects.find((item) => item.id === id) ?? {}
+    projectName.value = projects.find((item) => item.id === id)?.name ?? ''
+    try { sharedViews.value = await projectApi.views(id) } catch { sharedViews.value = [] }
+    try { projectFields.value = await projectApi.fields(id) } catch { projectFields.value = [] }
+    try { projectMembers.value = await projectApi.members(id) } catch { projectMembers.value = [] }
     stages.value = nextStages
     tasks.value = nextTasks
     rememberFromTasks()
@@ -77,6 +111,14 @@ async function load() {
     ElMessage.error(error instanceof ApiError ? error.message : '无法加载项目')
   }
 }
+
+async function setVisibility(value: 'SHARED'|'PRIVATE') { try { await projectApi.setVisibility(projectId.value, value); project.value = {...project.value, visibility:value}; ElMessage.success('项目可见范围已更新') } catch(e) { ElMessage.error(e instanceof ApiError ? e.message : '无法更新可见范围') } }
+async function createSavedView() { try { const {value} = await ElMessageBox.prompt('视图名称','保存当前视图'); const scope=await ElMessageBox.prompt('输入 PERSONAL 或 SHARED','视图范围',{inputValue:'PERSONAL',inputValidator:v=>['PERSONAL','SHARED'].includes(v.toUpperCase())||'请输入 PERSONAL 或 SHARED'}); const view=await projectApi.saveView(projectId.value,{name:value.trim(),scope:scope.value.toUpperCase() as 'PERSONAL'|'SHARED',configJson:JSON.stringify({...filters,mode:mode.value})}); sharedViews.value.push(view); ElMessage.success('视图已保存') } catch(e) { if(e !== 'cancel' && e !== 'close') ElMessage.error(e instanceof ApiError ? e.message : '保存视图失败') } }
+function applyServerView(id:number) { const view=sharedViews.value.find(v=>v.id===id); if(!view) return; try { const cfg=JSON.parse(view.configJson); Object.assign(filters,{search:cfg.search||'',status:cfg.status||'',priority:cfg.priority||''}); if(['list','board','stage'].includes(cfg.mode)) mode.value=cfg.mode } catch { ElMessage.error('视图配置无效') } }
+async function deleteServerView() { const view=sharedViews.value.find(v=>v.id===selectedServerView.value); if(!view) return; try { await ElMessageBox.confirm(`删除视图“${view.name}”？`,'删除视图'); await projectApi.removeView(projectId.value,view.id); sharedViews.value=sharedViews.value.filter(v=>v.id!==view.id); selectedServerView.value=undefined; ElMessage.success('视图已删除') } catch(e) { if(e!=='cancel'&&e!=='close') ElMessage.error(e instanceof ApiError?e.message:'删除视图失败') } }
+async function addProjectField() { try { const {value}=await ElMessageBox.prompt('字段名称','添加项目字段'); const field=await projectApi.addField(projectId.value,{name:value.trim(),type:newFieldType.value}); projectFields.value.push(field); ElMessage.success('字段已添加') } catch(e) { if(e !== 'cancel' && e !== 'close') ElMessage.error(e instanceof ApiError ? e.message : '无法添加字段') } }
+async function changeMemberRole(accountId:number, role:'OWNER'|'ADMIN'|'MEMBER'|'VIEWER') { try { await projectApi.setMemberRole(projectId.value,accountId,role); projectMembers.value=await projectApi.members(projectId.value); ElMessage.success('成员角色已更新') } catch(e) { ElMessage.error(e instanceof ApiError?e.message:'无法更新成员角色') } }
+async function addMember() { if(!memberToAdd.value)return; try { await projectApi.setMemberRole(projectId.value,memberToAdd.value,'MEMBER');projectMembers.value=await projectApi.members(projectId.value);memberToAdd.value=undefined;ElMessage.success('成员已加入项目') } catch(e) { ElMessage.error(e instanceof ApiError?e.message:'无法添加成员') } }
 
 async function addStage() {
   try {
@@ -119,6 +161,7 @@ async function removeStage(stage: Stage) {
 function openTaskDialog(stageId = stages.value[0]?.id) {
   taskForm.title = ''
   taskForm.priority = 'NONE'
+  taskForm.startDate = ''
   taskForm.dueDate = ''
   taskForm.description = ''
   taskForm.assigneeId = session.account?.id
@@ -140,6 +183,7 @@ async function createTask() {
     const created = await taskApi.create(projectId.value, {
       title: taskForm.title,
       priority: taskForm.priority,
+      startDate: taskForm.startDate,
       dueDate: taskForm.dueDate,
       description: taskForm.description || undefined,
       assigneeId,
@@ -153,7 +197,11 @@ async function createTask() {
 }
 
 watch(projectId, load)
-onMounted(load)
+const teamToday = ref<string>()
+onMounted(() => {
+  void load()
+  void getCalendarContext().then(context => { teamToday.value = context.today }).catch(() => { teamToday.value = undefined })
+})
 const deleting = ref(false)
 
 async function removeProject() {
@@ -186,10 +234,17 @@ async function removeProject() {
     <header class="v2-page-header">
       <div>
         <h1 class="v2-title">{{ projectName || '项目详情' }}</h1>
+        <el-tag v-if="project.role" size="small">{{ project.role }}</el-tag>
+        <el-tag size="small" type="info">{{ project.visibility === 'PRIVATE' ? '私人项目' : '共享项目' }}</el-tag>
       </div>
       <div class="actions">
+        <el-select v-if="project.role === 'OWNER'" :model-value="project.visibility || 'SHARED'" size="small" @change="setVisibility">
+          <el-option label="团队共享" value="SHARED"/><el-option label="仅自己可见" value="PRIVATE"/>
+        </el-select>
         <el-button @click="router.push({ name: 'project-planning', params: { projectId } })">周期与模块</el-button>
+        <el-button @click="router.push({ name: 'project-timeline', params: { projectId } })">甘特图</el-button>
         <el-button @click="router.push({ name: 'project-pages', params: { projectId } })">文档与统计</el-button>
+        <el-button @click="router.push({ name: 'project-operations', params: { projectId } })">审批、工时与基线</el-button>
         <el-radio-group v-model="mode" size="small">
           <el-radio-button value="list">列表</el-radio-button>
           <el-radio-button value="board">状态看板</el-radio-button>
@@ -202,6 +257,17 @@ async function removeProject() {
       </div>
     </header>
 
+    <section class="project-overview" aria-label="项目进度概览">
+      <button v-for="item in statusCounts" :key="item.value" type="button" class="overview-card"
+        :class="{ active: filters.status === item.value && !overdueOnly }"
+        :aria-pressed="filters.status === item.value && !overdueOnly" @click="drillStatus(item.value)">
+        <span>{{ item.label }}</span><strong>{{ item.count }}</strong>
+      </button>
+      <button type="button" class="overview-card" :class="{ active: overdueOnly }" :aria-pressed="overdueOnly" @click="drillOverdue">
+        <span>逾期任务</span><strong>{{ overdueCount }}</strong>
+      </button>
+    </section>
+
     <div class="task-filters">
       <el-input v-model="filters.search" aria-label="搜索任务" placeholder="搜索任务、说明或负责人" clearable />
       <el-select v-model="filters.status" aria-label="筛选状态" placeholder="所有状态" clearable>
@@ -210,12 +276,28 @@ async function removeProject() {
       <el-select v-model="filters.priority" aria-label="筛选优先级" placeholder="所有优先级" clearable>
         <el-option v-for="(label, value) in PRIORITY_LABELS" :key="value" :label="label" :value="value" />
       </el-select>
-      <el-select v-model="selectedFilter" aria-label="保存的视图" placeholder="保存的视图" @change="loadFilter">
-        <el-option v-for="view in savedFilters" :key="view.name" :label="view.name" :value="view.name" />
+      <el-select v-model="selectedServerView" aria-label="保存的视图" placeholder="保存的视图" @change="applyServerView">
+        <el-option v-for="view in sharedViews" :key="view.id" :label="`${view.name} · ${view.scope === 'SHARED' ? '共享' : '个人'}`" :value="view.id" />
       </el-select>
-      <el-button @click="saveFilter">保存当前视图</el-button>
-      <el-button :disabled="!hasSelectedFilter" @click="removeFilter">移除所选视图</el-button>
+      <el-button @click="createSavedView">保存当前视图</el-button>
+      <el-button :disabled="!selectedServerView" @click="deleteServerView">移除所选视图</el-button>
+      <el-button v-if="overdueOnly" @click="overdueOnly = false">清除逾期筛选</el-button>
     </div>
+    <section class="v2-card" style="padding:12px;margin:12px 0" aria-label="项目自定义字段">
+      <strong>项目字段</strong><el-select v-if="project.role === 'OWNER' || project.role === 'ADMIN'" v-model="newFieldType" size="small" style="width:150px;margin-left:8px"><el-option label="文本" value="TEXT"/><el-option label="单选" value="SINGLE_SELECT"/><el-option label="日期" value="DATE"/></el-select><el-button v-if="project.role === 'OWNER' || project.role === 'ADMIN'" link @click="addProjectField">添加字段</el-button>
+      <el-tag v-for="field in projectFields" :key="field.id" style="margin:6px">{{ field.name }} · {{ field.type }}</el-tag>
+      <el-tag v-for="view in sharedViews" :key="view.id" type="info" style="margin:6px">视图：{{ view.name }}（{{ view.scope === 'SHARED' ? '共享' : '个人' }}）</el-tag>
+    </section>
+    <section v-if="project.role === 'OWNER'" class="v2-card" style="padding:12px;margin:12px 0" aria-label="项目成员">
+      <strong>项目成员与角色</strong>
+      <el-select v-model="memberToAdd" filterable placeholder="添加团队成员" size="small" style="margin:8px"><el-option v-for="p in session.members.filter(x=>!projectMembers.some(m=>m.accountId===x.id))" :key="p.id" :label="p.displayName" :value="p.id"/></el-select><el-button size="small" :disabled="!memberToAdd" @click="addMember">添加</el-button>
+      <div v-for="member in projectMembers" :key="member.accountId" style="display:flex;align-items:center;gap:10px;margin-top:8px">
+        <span style="min-width:140px">{{ member.displayName }}</span>
+        <el-select :model-value="member.role" size="small" style="width:150px" :disabled="member.role === 'OWNER'" @change="changeMemberRole(member.accountId,$event)">
+          <el-option label="管理员" value="ADMIN"/><el-option label="成员" value="MEMBER"/><el-option label="只读" value="VIEWER"/>
+        </el-select>
+      </div>
+    </section>
 
     <div v-if="session.isCreator && managingStages" class="stages v2-card" style="padding: 12px; margin-bottom: 16px">
       <div v-for="stage in stages" :key="stage.id" class="stage-row">
@@ -232,7 +314,12 @@ async function removeProject() {
         <el-table-column label="优先级" width="100">
         <template #default="{ row }">{{ PRIORITY_LABELS[row.priority as TaskPriority] }}</template>
       </el-table-column>
-      <el-table-column prop="dueDate" label="截止日期" width="120" />
+      <el-table-column prop="dueDate" label="截止日期" width="155">
+        <template #default="{ row }">
+          {{ row.dueDate || '—' }}
+          <el-tag v-if="isOverdue(row, teamToday)" size="small" type="danger">逾期</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="assigneeName" label="负责人" width="140" />
         <el-table-column label="阶段" width="140">
           <template #default="{ row }">
@@ -265,7 +352,7 @@ async function removeProject() {
         >
           <strong>{{ task.title }}</strong>
           <div class="meta">
-            <span>{{ task.assigneeName }} · {{ PRIORITY_LABELS[task.priority] }}<template v-if="task.dueDate"> · {{ task.dueDate }}</template></span>
+            <span>{{ task.assigneeName }} · {{ PRIORITY_LABELS[task.priority] }}<template v-if="task.dueDate"> · {{ task.dueDate }}<el-tag v-if="isOverdue(task, teamToday)" size="small" type="danger">逾期</el-tag></template></span>
             <el-tag :type="statusType(task.status)" size="small">{{ statusLabel(task.status) }}</el-tag>
           </div>
         </button>
@@ -306,6 +393,7 @@ async function removeProject() {
             <el-option v-for="(label, value) in PRIORITY_LABELS" :key="value" :value="value" :label="label" />
           </el-select>
         </el-form-item>
+        <el-form-item label="开始日期"><el-input v-model="taskForm.startDate" type="date" /></el-form-item>
         <el-form-item label="截止日期">
           <el-input v-model="taskForm.dueDate" type="date" />
         </el-form-item>
@@ -402,6 +490,11 @@ async function removeProject() {
 }
 
 .v2-page { max-width: none; }
+.project-overview { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:12px 0; }
+.overview-card { display:flex; flex-direction:column; align-items:flex-start; gap:8px; padding:12px 16px; border:1px solid var(--color-border); border-radius:8px; background:white; color:inherit; text-align:left; }
+button.overview-card { cursor:pointer; }
+.overview-card.active { border-color:var(--color-primary); }
+.overview-card strong { font-size:22px; }
 .v2-page-header { align-items: center; }
 .task-filters {
   background: white;

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NotificationChannels from '../../components/NotificationChannels.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -63,6 +64,7 @@ onMounted(load)
         <el-input v-model="search" placeholder="搜索通知内容" aria-label="搜索通知内容" clearable />
         <span>{{ visible.length }} 条通知</span>
       </div>
+      <NotificationChannels />
       <el-table :data="visible" empty-text="暂无符合条件的通知">
         <el-table-column label="状态" width="90">
           <template #default="{ row }">

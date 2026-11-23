@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NotificationChannels from '../components/NotificationChannels.vue'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -45,6 +46,7 @@ onMounted(load)
       <h1>通知</h1>
       <el-button @click="readAll">全部标为已读</el-button>
     </div>
+    <NotificationChannels />
     <el-table :data="list" size="small" empty-text="暂无通知">
       <el-table-column label="状态" width="90">
         <template #default="{ row }">

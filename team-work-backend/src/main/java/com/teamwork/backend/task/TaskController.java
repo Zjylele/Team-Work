@@ -36,7 +36,7 @@ public class TaskController {
     @PostMapping("/api/projects/{projectId}/tasks")
     public TaskService.TaskView create(@PathVariable Long projectId, @Valid @RequestBody TaskRequest request) {
         return taskService.create(currentAccount.requireCreator(), projectId, request.title(), request.description(),
-                request.assigneeId(), request.stageId(), request.priority(), request.dueDate());
+                request.assigneeId(), request.stageId(), request.priority(), request.dueDate(), request.startDate());
     }
 
     @GetMapping("/api/tasks/{taskId}")
@@ -53,7 +53,7 @@ public class TaskController {
     @PatchMapping("/api/tasks/{taskId}")
     public TaskService.TaskView update(@PathVariable Long taskId, @RequestBody TaskUpdate request) {
         return taskService.update(currentAccount.requireMember(), taskId, request.title(), request.description(),
-                request.assigneeId(), request.stageId(), request.priority(), request.dueDate());
+                request.assigneeId(), request.stageId(), request.priority(), request.dueDate(), request.startDate());
     }
 
     @PostMapping("/api/tasks/{taskId}/start")
@@ -76,6 +76,11 @@ public class TaskController {
         return taskService.comments(currentAccount.requireMember(), taskId);
     }
 
+    @GetMapping("/api/tasks/{taskId}/activity")
+    public List<TaskService.ActivityView> activity(@PathVariable Long taskId) {
+        return taskService.activity(currentAccount.requireMember(), taskId);
+    }
+
     @PostMapping("/api/tasks/{taskId}/comments")
     public TaskService.CommentView comment(@PathVariable Long taskId, @Valid @RequestBody CommentRequest request) {
         return taskService.comment(currentAccount.requireMember(), taskId, request.content());
@@ -88,11 +93,11 @@ public class TaskController {
             @Size(max = 2000, message = "说明最长 2000 个字符")
             String description,
             @NotNull(message = "请指定负责人") Long assigneeId,
-            @NotNull(message = "请指定阶段") Long stageId, String priority, String dueDate
+            @NotNull(message = "请指定阶段") Long stageId, String priority, String dueDate, String startDate
     ) {
     }
 
-    public record TaskUpdate(String title, String description, Long assigneeId, Long stageId, String priority, String dueDate) {
+    public record TaskUpdate(String title, String description, Long assigneeId, Long stageId, String priority, String dueDate, String startDate) {
     }
 
     public record StatusRequest(@NotBlank(message = "请填写状态") String status) {

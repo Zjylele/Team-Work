@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 export const APP_NAV_ITEMS = [
   { path: '/', icon: House, label: '工作台', short: '工作台' },
   { path: '/projects', icon: FolderOpened, label: '项目', short: '项目' },
+  { path: '/portfolios', icon: FolderOpened, label: '项目集', short: '项目集' },
   { path: '/calendar', icon: Calendar, label: '任务日历', short: '日历' },
   { path: '/notifications', icon: Bell, label: '通知', short: '通知' },
   { path: '/directory', icon: User, label: '通讯录', short: '通讯录' },
@@ -15,6 +16,7 @@ export function useAppNavActive() {
   const route = useRoute()
   return computed(() => {
     if (route.path.startsWith('/projects') || route.path.startsWith('/tasks')) return '/projects'
+    if (route.path === '/portfolios') return '/portfolios'
     if (route.path === '/calendar') return '/calendar'
     if (route.path.startsWith('/notifications')) return '/notifications'
     if (route.path === '/directory') return '/directory'

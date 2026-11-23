@@ -22,17 +22,17 @@ public class NotificationController {
 
     @GetMapping("/api/notifications")
     public List<NotificationService.NotificationView> list() {
-        return notificationService.list(currentAccount.requireAccount().getId());
+        return notificationService.list(currentAccount.requireMember());
     }
 
     @PostMapping("/api/notifications/{id}/read")
     public NotificationService.NotificationView open(@PathVariable Long id) {
-        return notificationService.open(currentAccount.requireAccount().getId(), id);
+        return notificationService.open(currentAccount.requireMember(), id);
     }
 
     @PostMapping("/api/notifications/read-all")
     public Map<String, String> readAll() {
-        notificationService.markAllRead(currentAccount.requireAccount().getId());
+        notificationService.markAllRead(currentAccount.requireMember());
         return Map.of("message", "已全部标为已读");
     }
 }

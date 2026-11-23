@@ -61,6 +61,11 @@ const router = createRouter({
           ),
         },
         {
+          path: 'projects/:projectId/operations',
+          name: 'project-operations',
+          component: () => import('../views/ProjectOperationsView.vue'),
+        },
+        {
           path: 'projects/:projectId/pages',
           name: 'project-pages',
           component: () => import('../views/ProjectPagesView.vue'),
@@ -77,6 +82,16 @@ const router = createRouter({
             () => import('../views/TaskDetailView.vue'),
             () => import('../views/v2/TaskDetailView.vue'),
           ),
+        },
+        {
+          path: 'portfolios',
+          name: 'portfolios',
+          component: () => import('../views/PortfoliosView.vue'),
+        },
+        {
+          path: 'projects/:projectId/timeline',
+          name: 'project-timeline',
+          component: () => import('../views/ProjectTimelineView.vue'),
         },
         {
           path: 'calendar',

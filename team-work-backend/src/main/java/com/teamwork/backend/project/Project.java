@@ -15,5 +15,7 @@ public class Project {
     private Long id;
     private Long teamId;
     private String name;
+    private String visibility;
+    private Long ownerId;
     private LocalDateTime createdAt;
 }

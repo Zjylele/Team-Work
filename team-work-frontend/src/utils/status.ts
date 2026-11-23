@@ -3,17 +3,19 @@ import type { TaskStatus } from '../api/types'
 export const STATUS_LABEL: Record<TaskStatus, string> = {
   TODO: '待开始',
   DOING: '进行中',
+  REVIEW: '待验收',
   DONE: '已完成',
 }
 
 export const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: 'TODO', label: '待开始' },
   { value: 'DOING', label: '进行中' },
+  { value: 'REVIEW', label: '待验收' },
   { value: 'DONE', label: '已完成' },
 ]
 
 export function statusLabel(status: string) {
-  if (status === 'TODO' || status === 'DOING' || status === 'DONE') {
+  if (status === 'REVIEW' || status === 'TODO' || status === 'DOING' || status === 'DONE') {
     return STATUS_LABEL[status]
   }
   return status
