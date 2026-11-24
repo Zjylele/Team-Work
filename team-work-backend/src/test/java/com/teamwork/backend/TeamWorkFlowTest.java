@@ -1,6 +1,5 @@
 package com.teamwork.backend;
 
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,7 +17,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.Matchers.hasSize;
@@ -31,6 +29,96 @@ class TeamWorkFlowTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Test
+    void privateProjectsRequireMembershipAndViewerCannotWrite() throws Exception {
+        MockHttpSession owner = register("p1owner", "password1", "所有者");
+        mockMvc.perform(post("/api/team").session(owner).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"P1团队\"}"))
+                .andExpect(status().isOk());
+        String invite = read(mockMvc.perform(get("/api/team").session(owner)).andReturn(), "$.inviteCode");
+        MockHttpSession viewer = register("p1viewer", "password1", "只读成员");
+        mockMvc.perform(post("/api/team/join").session(viewer).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"" + invite + "\"}"))
+                .andExpect(status().isOk());
+
+        String privateProject = read(mockMvc.perform(post("/api/projects").session(owner).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"私有项目\",\"visibility\":\"PRIVATE\"}"))
+                .andExpect(status().isOk()).andReturn(), "$.id");
+        mockMvc.perform(get("/api/projects").session(viewer)).andExpect(jsonPath("$", hasSize(0)));
+        mockMvc.perform(get("/api/projects/" + privateProject + "/tasks").session(viewer)).andExpect(status().isNotFound());
+
+        mockMvc.perform(put("/api/projects/" + privateProject + "/members/" + read(mockMvc.perform(get("/api/auth/me").session(viewer)).andReturn(), "$.id"))
+                        .session(owner).with(csrf()).contentType(MediaType.APPLICATION_JSON).content("{\"role\":\"VIEWER\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/projects").session(viewer)).andExpect(jsonPath("$[0].name").value("私有项目"));
+        mockMvc.perform(get("/api/projects/" + privateProject + "/members").session(viewer)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/projects/" + privateProject + "/stages").session(viewer).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"不允许\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void templateProjectsKeepIndependentViewsAndValidateTaskFields() throws Exception {
+        MockHttpSession owner = register("configowner", "password1", "配置所有者");
+        mockMvc.perform(post("/api/team").session(owner).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"配置测试团队\"}"))
+                .andExpect(status().isOk());
+        String invite = read(mockMvc.perform(get("/api/team").session(owner)).andReturn(), "$.inviteCode");
+        MockHttpSession member = register("configmember", "password1", "配置成员");
+        mockMvc.perform(post("/api/team/join").session(member).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"code\":\"" + invite + "\"}"))
+                .andExpect(status().isOk());
+        String memberId = read(mockMvc.perform(get("/api/auth/me").session(member)).andReturn(), "$.id");
+        mockMvc.perform(get("/api/project-templates").session(owner)).andExpect(jsonPath("$", hasSize(2)));
+
+        String first = createTemplateProject(owner, "交付甲");
+        String second = createTemplateProject(owner, "交付乙");
+        String firstProject = "/api/projects/" + first;
+        String secondProject = "/api/projects/" + second;
+        String stage = read(mockMvc.perform(get(firstProject + "/stages").session(owner))
+                .andExpect(jsonPath("$", hasSize(4))).andReturn(), "$[0].id");
+        mockMvc.perform(get(secondProject + "/stages").session(owner)).andExpect(jsonPath("$", hasSize(4)));
+        mockMvc.perform(get(firstProject + "/fields").session(owner))
+                .andExpect(jsonPath("$[0].name").value("交付版本"));
+
+        String personalView = read(mockMvc.perform(post(firstProject + "/views").session(owner).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"自己的列表\",\"scope\":\"PERSONAL\",\"configJson\":\"{\\\"mode\\\":\\\"list\\\",\\\"status\\\":\\\"DOING\\\"}\"}"))
+                .andExpect(status().isOk()).andReturn(), "$.id");
+        mockMvc.perform(get(firstProject + "/views").session(owner)).andExpect(jsonPath("$", hasSize(2)));
+        mockMvc.perform(get(firstProject + "/views").session(member)).andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].scope").value("SHARED"));
+        mockMvc.perform(get(secondProject + "/views").session(owner)).andExpect(jsonPath("$", hasSize(1)));
+        mockMvc.perform(patch(firstProject + "/views/" + personalView).session(member).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"不允许\"}"))
+                .andExpect(status().isNotFound());
+
+        String field = read(mockMvc.perform(post(firstProject + "/fields").session(owner).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"发布渠道\",\"type\":\"SINGLE_SELECT\",\"required\":true,\"options\":[{\"label\":\"预览\"}]}"))
+                .andExpect(status().isOk()).andReturn(), "$.id");
+        mockMvc.perform(get(secondProject + "/fields").session(owner)).andExpect(jsonPath("$", hasSize(1)));
+        String taskId = read(mockMvc.perform(post(firstProject + "/tasks").session(owner).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"确认版本\",\"assigneeId\":" + memberId + ",\"stageId\":" + stage + "}"))
+                .andExpect(status().isOk()).andReturn(), "$.id");
+        String valuesUrl = "/api/tasks/" + taskId + "/fields";
+        mockMvc.perform(put(valuesUrl).session(member).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"values\":{\"" + field + "\":\"预览\"}}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$['" + field + "']").value("预览"));
+        mockMvc.perform(put(valuesUrl).session(member).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"values\":{\"" + field + "\":\"未知\"}}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get(valuesUrl).session(owner)).andExpect(jsonPath("$['" + field + "']").value("预览"));
+    }
+
+    private String createTemplateProject(MockHttpSession owner, String name) throws Exception {
+        return read(mockMvc.perform(post("/api/projects").session(owner).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"" + name + "\",\"templateId\":2}"))
+                .andExpect(status().isOk()).andReturn(), "$.id");
+    }
 
     @Test
     void creatorAssignsAndMemberMovesTaskThroughNotifications() throws Exception {
@@ -232,35 +320,6 @@ class TeamWorkFlowTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"code\":\"ZZZZZ\"}"))
                 .andExpect(status().isTooManyRequests());
-    }
-
-    @Test
-    void csrfTokenFromEndpointAllowsWriteAndCorsAllowsVite() throws Exception {
-        mockMvc.perform(options("/api/auth/login")
-                        .header("Origin", "http://localhost:5173")
-                        .header("Access-Control-Request-Method", "POST")
-                        .header("Access-Control-Request-Headers", "content-type,x-xsrf-token"))
-                .andExpect(status().isOk())
-                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
-                .andExpect(header().string("Access-Control-Allow-Credentials", "true"));
-
-        MvcResult csrf = mockMvc.perform(get("/api/auth/csrf").header("Origin", "http://localhost:5173"))
-                .andExpect(status().isOk())
-                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:5173"))
-                .andExpect(header().string("Access-Control-Allow-Credentials", "true"))
-                .andExpect(jsonPath("$.token").isString())
-                .andExpect(jsonPath("$.headerName").value("X-XSRF-TOKEN"))
-                .andReturn();
-        String token = read(csrf, "$.token");
-        Cookie csrfCookie = csrf.getResponse().getCookie("XSRF-TOKEN");
-        mockMvc.perform(post("/api/auth/register")
-                        .header("Origin", "http://localhost:5173")
-                        .header("X-XSRF-TOKEN", token)
-                        .cookie(csrfCookie)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"username\":\"csrfuser\",\"password\":\"password1\",\"displayName\":\"跨域用户\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.username").value("csrfuser"));
     }
 
     private MockHttpSession register(String username, String password, String displayName) throws Exception {

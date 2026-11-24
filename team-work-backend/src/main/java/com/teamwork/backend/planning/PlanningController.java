@@ -30,7 +30,7 @@ public class PlanningController {
 
     @GetMapping
     public List<Entry> list(@PathVariable long projectId) {
-        projects.requireInTeam(projectId, account.requireMember().getTeamId());
+        projects.requireAccessible(projectId, account.requireMember());
         return plans.list(projectId).stream().map(plan -> new Entry(plan, plans.tasks(plan.id()))).toList();
     }
 
@@ -66,10 +66,14 @@ public class PlanningController {
     }
 
     private void authorize(long projectId) {
-        projects.requireInTeam(projectId, account.requireCreator().getTeamId());
+        projects.requireWritable(projectId, account.requireCreator());
     }
 
     private void validateDates(Form form) {
+        if ("MILESTONE".equals(form.kind()) && (form.endDate() == null
+                || (form.startDate() != null && !form.startDate().equals(form.endDate())))) {
+            throw new ApiException(400, "里程碑需要一个目标日期");
+        }
         if ("CYCLE".equals(form.kind()) && (form.startDate() == null || form.endDate() == null)) {
             throw new ApiException(400, "迭代需要开始和结束日期");
         }
@@ -79,7 +83,7 @@ public class PlanningController {
     }
 
     public record Entry(PlanningMapper.Plan plan, List<Long> taskIds) {}
-    public record Form(@NotNull @Pattern(regexp = "CYCLE|MODULE") String kind,
+    public record Form(@NotNull @Pattern(regexp = "CYCLE|MODULE|MILESTONE") String kind,
                        @NotBlank @Size(max = 80) String name,
                        @NotNull @Size(max = 1000) String description,
                        LocalDate startDate, LocalDate endDate) {}

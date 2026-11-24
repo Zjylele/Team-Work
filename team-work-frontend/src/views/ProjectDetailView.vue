@@ -11,6 +11,7 @@ import { STATUS_OPTIONS, statusLabel, statusType } from '../utils/status'
 import { PRIORITY_LABELS } from '../utils/priority'
 import type { TaskPriority } from '../api/types'
 
+import { getCalendarContext, isOverdue } from '../api/calendarContext'
 import { useTaskFilters } from '../utils/taskFilters'
 
 const route = useRoute()
@@ -18,6 +19,13 @@ const router = useRouter()
 const session = useSessionStore()
 const projectId = computed(() => Number(route.params.projectId))
 const stages = ref<Stage[]>([])
+const project = ref<{visibility?:'SHARED'|'PRIVATE';role?:string}>({})
+const projectMembers = ref<{accountId:number;displayName:string;role:'OWNER'|'ADMIN'|'MEMBER'|'VIEWER'}[]>([])
+const projectFields = ref<{id:number;name:string;type:string}[]>([])
+const serverViews = ref<{id:number;name:string;scope:'PERSONAL'|'SHARED';configJson:string}[]>([])
+const serverViewId = ref<number>()
+const newFieldType = ref<'TEXT'|'SINGLE_SELECT'|'DATE'>('TEXT')
+const memberToAdd = ref<number>()
 const tasks = ref<Task[]>([])
 const mode = ref<'list' | 'board' | 'stage'>('list')
 const stageDialog = ref(false)
@@ -26,6 +34,7 @@ const stageName = ref('')
 const taskForm = reactive({
   title: '',
   priority: 'NONE' as TaskPriority,
+  startDate: '',
   dueDate: '',
   description: '',
   assigneeId: undefined as number | undefined,
@@ -34,7 +43,7 @@ const taskForm = reactive({
 })
 
 const filterStorageKey = computed(() => 'team-work:task-views:' + session.account?.id + ':' + projectId.value)
-const { filters, savedFilters, selectedFilter, hasSelectedFilter, loadFilter, saveFilter, removeFilter } =
+const { filters } =
   useTaskFilters(filterStorageKey)
 const filteredTasks = computed(() => {
   const search = filters.search.trim().toLowerCase()
@@ -64,13 +73,25 @@ function rememberFromTasks() {
 
 async function load() {
   try {
+    const projects = await projectApi.list()
+    project.value = projects.find(p=>p.id===projectId.value) ?? {}
     stages.value = await projectApi.stages(projectId.value)
     tasks.value = await taskApi.list(projectId.value)
+    try { serverViews.value = await projectApi.views(projectId.value) } catch { serverViews.value=[] }
+    try { projectMembers.value = await projectApi.members(projectId.value) } catch { projectMembers.value=[] }
+    try { projectFields.value = await projectApi.fields(projectId.value) } catch { projectFields.value=[] }
     rememberFromTasks()
   } catch (error) {
     ElMessage.error(error instanceof ApiError ? error.message : '无法加载项目')
   }
 }
+async function setVisibility(value:'SHARED'|'PRIVATE') { try { await projectApi.setVisibility(projectId.value,value); project.value={...project.value,visibility:value}; ElMessage.success('项目可见范围已更新') } catch(e) { ElMessage.error(e instanceof ApiError?e.message:'无法更新可见范围') } }
+async function applyServerView(id:number) { const v=serverViews.value.find(x=>x.id===id); if(!v)return; try { const c=JSON.parse(v.configJson); Object.assign(filters,{search:c.search||'',status:c.status||'',priority:c.priority||''}); if(['list','board','stage'].includes(c.mode))mode.value=c.mode } catch { ElMessage.error('视图配置无效') } }
+async function saveServerView() { try { const {value}=await ElMessageBox.prompt('视图名称','保存当前视图'); const scope=await ElMessageBox.prompt('输入 PERSONAL 或 SHARED','视图范围',{inputValue:'PERSONAL',inputValidator:v=>['PERSONAL','SHARED'].includes(v.toUpperCase())||'请输入 PERSONAL 或 SHARED'}); serverViews.value.push(await projectApi.saveView(projectId.value,{name:value.trim(),scope:scope.value.toUpperCase() as 'PERSONAL'|'SHARED',configJson:JSON.stringify({...filters,mode:mode.value})})) } catch(e) { if(e!=='cancel'&&e!=='close')ElMessage.error(e instanceof ApiError?e.message:'无法保存视图') } }
+async function deleteServerView() { if(!serverViewId.value)return; try { await projectApi.removeView(projectId.value,serverViewId.value); serverViews.value=serverViews.value.filter(v=>v.id!==serverViewId.value);serverViewId.value=undefined } catch(e) { ElMessage.error(e instanceof ApiError?e.message:'无法删除视图') } }
+async function changeRole(accountId:number,role:'ADMIN'|'MEMBER'|'VIEWER') { try { await projectApi.setMemberRole(projectId.value,accountId,role);projectMembers.value=await projectApi.members(projectId.value);ElMessage.success('成员角色已更新') } catch(e) { ElMessage.error(e instanceof ApiError?e.message:'无法更新角色') } }
+async function addField() { try { const {value}=await ElMessageBox.prompt('字段名称','添加字段'); projectFields.value.push(await projectApi.addField(projectId.value,{name:value.trim(),type:newFieldType.value})) } catch(e) { if(e!=='cancel'&&e!=='close')ElMessage.error(e instanceof ApiError?e.message:'无法添加字段') } }
+async function addMember() { if(!memberToAdd.value)return; try { await projectApi.setMemberRole(projectId.value,memberToAdd.value,'MEMBER');projectMembers.value=await projectApi.members(projectId.value);memberToAdd.value=undefined;ElMessage.success('成员已加入项目') } catch(e) { ElMessage.error(e instanceof ApiError?e.message:'无法添加成员') } }
 
 async function addStage() {
   try {
@@ -113,6 +134,7 @@ async function removeStage(stage: Stage) {
 function openTaskDialog() {
   taskForm.title = ''
   taskForm.priority = 'NONE'
+  taskForm.startDate = ''
   taskForm.dueDate = ''
   taskForm.description = ''
   taskForm.assigneeId = session.account?.id
@@ -134,6 +156,7 @@ async function createTask() {
     const created = await taskApi.create(projectId.value, {
       title: taskForm.title,
       priority: taskForm.priority,
+      startDate: taskForm.startDate,
       dueDate: taskForm.dueDate,
       description: taskForm.description || undefined,
       assigneeId,
@@ -147,7 +170,11 @@ async function createTask() {
 }
 
 watch(projectId, load)
-onMounted(load)
+const teamToday = ref<string>()
+onMounted(() => {
+  void load()
+  void getCalendarContext().then(context => { teamToday.value = context.today }).catch(() => { teamToday.value = undefined })
+})
 const deleting = ref(false)
 
 async function removeProject() {
@@ -178,10 +205,14 @@ async function removeProject() {
       <div>
         <el-button link @click="router.push('/projects')">返回项目</el-button>
         <h1>项目详情</h1>
+        <el-tag>{{ project.role || '项目成员' }}</el-tag><el-tag type="info">{{ project.visibility==='PRIVATE'?'私人':'共享' }}</el-tag>
       </div>
+      <el-select v-if="project.role==='OWNER'" :model-value="project.visibility||'SHARED'" @change="setVisibility"><el-option label="共享" value="SHARED"/><el-option label="私人" value="PRIVATE"/></el-select>
       <div class="actions">
         <el-button @click="router.push({ name: 'project-planning', params: { projectId } })">周期与模块</el-button>
+        <el-button @click="router.push({ name: 'project-timeline', params: { projectId } })">甘特图</el-button>
         <el-button @click="router.push({ name: 'project-pages', params: { projectId } })">文档与统计</el-button>
+        <el-button @click="router.push({ name: 'project-operations', params: { projectId } })">审批、工时与基线</el-button>
         <el-radio-group v-model="mode" size="small">
           <el-radio-button value="list">列表</el-radio-button>
           <el-radio-button value="board">状态看板</el-radio-button>
@@ -191,12 +222,15 @@ async function removeProject() {
         <el-button v-if="session.isCreator" @click="stageDialog = true">添加阶段</el-button>
         <el-button v-if="session.isCreator" type="primary" @click="openTaskDialog">新建任务</el-button>
       </div>
-      <el-select v-model="selectedFilter" aria-label="保存的视图" placeholder="保存的视图" @change="loadFilter">
-        <el-option v-for="view in savedFilters" :key="view.name" :label="view.name" :value="view.name" />
+      <el-select v-model="serverViewId" aria-label="保存的视图" placeholder="保存的视图" @change="applyServerView">
+        <el-option v-for="view in serverViews" :key="view.id" :label="`${view.name} · ${view.scope}`" :value="view.id" />
       </el-select>
-      <el-button @click="saveFilter">保存当前视图</el-button>
-      <el-button :disabled="!hasSelectedFilter" @click="removeFilter">移除所选视图</el-button>
+      <el-button @click="saveServerView">保存当前视图</el-button>
+      <el-button :disabled="!serverViewId" @click="deleteServerView">移除所选视图</el-button>
     </div>
+    <section class="stages"><strong>项目字段</strong><el-select v-if="project.role==='OWNER'||project.role==='ADMIN'" v-model="newFieldType" size="small" style="width:150px;margin-left:8px"><el-option label="文本" value="TEXT"/><el-option label="单选" value="SINGLE_SELECT"/><el-option label="日期" value="DATE"/></el-select><el-button v-if="project.role==='OWNER'||project.role==='ADMIN'" link @click="addField">添加字段</el-button><el-tag v-for="f in projectFields" :key="f.id" style="margin:4px">{{f.name}} · {{f.type}}</el-tag>
+      <div v-if="project.role==='OWNER'" style="margin-top:10px"><strong>成员权限</strong><el-select v-model="memberToAdd" filterable placeholder="添加团队成员" size="small" style="margin-left:8px"><el-option v-for="p in session.members.filter(x=>!projectMembers.some(m=>m.accountId===x.id))" :key="p.id" :label="p.displayName" :value="p.id"/></el-select><el-button size="small" :disabled="!memberToAdd" @click="addMember">添加</el-button><div v-for="m in projectMembers" :key="m.accountId" style="display:flex;gap:10px;margin-top:6px">{{m.displayName}}<el-select :model-value="m.role" :disabled="m.role==='OWNER'" size="small" @change="changeRole(m.accountId,$event)"><el-option label="管理员" value="ADMIN"/><el-option label="成员" value="MEMBER"/><el-option label="只读" value="VIEWER"/></el-select></div></div>
+    </section>
 
     <div v-if="session.isCreator" class="stages">
       <div v-for="stage in stages" :key="stage.id" class="stage-row">
@@ -212,7 +246,12 @@ async function removeProject() {
       <el-table-column label="优先级" width="100">
         <template #default="{ row }">{{ PRIORITY_LABELS[row.priority as TaskPriority] }}</template>
       </el-table-column>
-      <el-table-column prop="dueDate" label="截止日期" width="120" />
+      <el-table-column prop="dueDate" label="截止日期" width="155">
+        <template #default="{ row }">
+          {{ row.dueDate || '—' }}
+          <el-tag v-if="isOverdue(row, teamToday)" size="small" type="danger">逾期</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column prop="assigneeName" label="负责人" width="140" />
       <el-table-column label="阶段" width="140">
         <template #default="{ row }">
@@ -242,7 +281,7 @@ async function removeProject() {
         >
           <div>{{ task.title }}</div>
           <div class="meta">
-            <span>{{ task.assigneeName }} · {{ PRIORITY_LABELS[task.priority] }}<template v-if="task.dueDate"> · {{ task.dueDate }}</template></span>
+            <span>{{ task.assigneeName }} · {{ PRIORITY_LABELS[task.priority] }}<template v-if="task.dueDate"> · {{ task.dueDate }}<el-tag v-if="isOverdue(task, teamToday)" size="small" type="danger">逾期</el-tag></template></span>
             <el-tag :type="statusType(task.status)" size="small">{{ statusLabel(task.status) }}</el-tag>
           </div>
         </button>
@@ -275,6 +314,7 @@ async function removeProject() {
             <el-option v-for="(label, value) in PRIORITY_LABELS" :key="value" :value="value" :label="label" />
           </el-select>
         </el-form-item>
+        <el-form-item label="开始日期"><el-input v-model="taskForm.startDate" type="date" /></el-form-item>
         <el-form-item label="截止日期">
           <el-input v-model="taskForm.dueDate" type="date" />
         </el-form-item>

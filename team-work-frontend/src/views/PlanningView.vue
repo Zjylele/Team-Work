@@ -6,7 +6,7 @@ import { taskApi } from '../api/client'
 import { del, get, post, put } from '../api/http'
 import { useSessionStore } from '../stores/session'
 
-type Kind = 'CYCLE' | 'MODULE'
+type Kind = 'CYCLE' | 'MODULE' | 'MILESTONE'
 type Form = {
   kind: Kind
   name: string
@@ -28,6 +28,9 @@ function completedCount(entry: Entry) {
 
 const taskById = computed(() => new Map(tasks.value.map(task => [task.id, task])))
 const kind = ref<Kind>('CYCLE')
+watch(() => route.query.kind, (value) => {
+  if (value === 'CYCLE' || value === 'MODULE' || value === 'MILESTONE') kind.value = value
+}, { immediate: true })
 const shown = computed(() => entries.value.filter(entry => entry.plan.kind === kind.value))
 const loading = ref(false)
 const error = ref('')
@@ -107,15 +110,18 @@ watch(projectId, load, { immediate: true })
 <template>
   <section class="planning">
     <RouterLink :to="{ name: 'project', params: { projectId } }">返回项目</RouterLink>
+    · <RouterLink :to="{ name: 'project-timeline', params: { projectId } }">甘特图</RouterLink>
+    · <RouterLink :to="{ name: 'calendar', query: { projectId } }">项目日历</RouterLink>
     <header>
       <h1>项目计划</h1>
       <el-button v-if="session.isCreator" type="primary" @click="open()">
-        新建{{ kind === 'CYCLE' ? '迭代' : '模块' }}
+        新建{{ kind === 'CYCLE' ? '迭代' : kind === 'MODULE' ? '模块' : '里程碑' }}
       </el-button>
     </header>
     <el-tabs v-model="kind">
       <el-tab-pane name="CYCLE" label="迭代" />
       <el-tab-pane name="MODULE" label="模块" />
+      <el-tab-pane name="MILESTONE" label="里程碑" />
     </el-tabs>
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <div v-else v-loading="loading" class="plans">
@@ -132,6 +138,8 @@ watch(projectId, load, { immediate: true })
         <p v-if="entry.plan.startDate || entry.plan.endDate">
           {{ entry.plan.startDate || '未设开始日期' }} 至 {{ entry.plan.endDate || '未设结束日期' }}
         </p>
+        <RouterLink v-if="entry.plan.startDate || entry.plan.endDate"
+          :to="{ name: 'calendar', query: { projectId, date: entry.plan.startDate || entry.plan.endDate } }">在日历查看</RouterLink>
         <h3>关联任务（{{ completedCount(entry) }} / {{ entry.taskIds.length }} 已完成）</h3>
         <ul v-if="entry.taskIds.length">
           <li v-for="taskId in entry.taskIds" :key="taskId">
@@ -146,10 +154,10 @@ watch(projectId, load, { immediate: true })
       <el-form label-position="top" @submit.prevent="save">
         <el-form-item label="名称" required><el-input v-model="form.name" maxlength="80" /></el-form-item>
         <el-form-item label="说明"><el-input v-model="form.description" type="textarea" maxlength="1000" /></el-form-item>
-        <el-form-item label="开始日期" :required="form.kind === 'CYCLE'">
+        <el-form-item v-if="form.kind !== 'MILESTONE'" label="开始日期" :required="form.kind === 'CYCLE'">
           <el-date-picker v-model="form.startDate" value-format="YYYY-MM-DD" type="date" />
         </el-form-item>
-        <el-form-item label="结束日期" :required="form.kind === 'CYCLE'">
+        <el-form-item :label="form.kind === 'MILESTONE' ? '目标日期' : '结束日期'" :required="form.kind !== 'MODULE'">
           <el-date-picker v-model="form.endDate" value-format="YYYY-MM-DD" type="date" />
         </el-form-item>
         <el-form-item v-if="editingId" label="关联任务">

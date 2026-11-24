@@ -59,25 +59,25 @@ function navigate(path: string) {
 </template>
 
 <style scoped>
-.shell { display: grid; grid-template-columns: 204px minmax(0, 1fr); min-height: 100dvh; }
+.shell { display: grid; grid-template-columns: 144px minmax(0, 1fr); min-height: 100dvh; }
 .side {
   position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column;
-  padding: 0 10px 12px; background: #303a48; z-index: 30;
+  padding: 0 10px 12px; background: #ededef; color: #252830; border-right: 1px solid #dedee2; z-index: 30;
 }
-.brand { display: flex; align-items: center; gap: 10px; min-height: 68px; padding: 10px; }
+.brand { display: flex; align-items: center; gap: 10px; min-height: 68px; padding: 8px 4px; }
 .brand > div { min-width: 0; }
 .brand strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .brand small { display: block; margin-top: 3px; opacity: .8; }
 .mark, .section-icon, .avatar { display: grid; place-items: center; flex: none; }
-.mark { width: 32px; height: 32px; background: #486adc; border-radius: 8px; }
+.mark { width: 32px; height: 32px; background: #242629; color: white; border-radius: 8px; }
 .nav-item {
   display: flex; align-items: center; gap: 11px; width: 100%; min-height: 40px; margin-bottom: 3px;
   padding: 0 11px; border: 0; border-radius: 6px; background: transparent; text-align: left; cursor: pointer;
 }
-.nav-item:hover { background: #3b4758; }
-.nav-item.on { background: #465772; box-shadow: inset 3px 0 #9fb8ff; font-weight: 650; }
-.side-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; border-top: 1px solid #536073; padding: 12px 8px 0; }
-.surface { min-width: 0; }
+.nav-item:hover { background: #e1e2e6; }
+.nav-item.on { background: #fff; box-shadow: 0 1px 3px #20222714; font-weight: 650; }
+.side-foot { display: flex; align-items: center; justify-content: space-between; margin-top: auto; border-top: 1px solid #dcdde2; padding: 12px 0 0; }
+.surface { min-width: 0; background: #f4f4f5; }
 .toolbar {
   position: sticky; top: 0; z-index: 15; height: 53px; display: flex; align-items: center; gap: 10px;
   padding: 0 20px; border-bottom: 1px solid var(--color-border); background: #fff;

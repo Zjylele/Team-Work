@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -34,12 +35,28 @@ public class ProjectController {
 
     @PostMapping("/api/projects")
     public ProjectService.ProjectView create(@Valid @RequestBody NameRequest request) {
-        return projectService.create(currentAccount.requireCreator(), request.name());
+        return projectService.create(currentAccount.requireCreator(), request.name(), request.templateId(), request.visibility() == null ? "SHARED" : request.visibility());
     }
 
     @PatchMapping("/api/projects/{projectId}")
     public ProjectService.ProjectView rename(@PathVariable Long projectId, @Valid @RequestBody NameRequest request) {
         return projectService.rename(currentAccount.requireCreator(), projectId, request.name().strip());
+    }
+
+    @PatchMapping("/api/projects/{projectId}/visibility")
+    public ProjectService.ProjectView visibility(@PathVariable Long projectId, @RequestBody VisibilityRequest request) {
+        return projectService.updateVisibility(currentAccount.requireMember(), projectId, request.visibility());
+    }
+
+    @PutMapping("/api/projects/{projectId}/members/{accountId}")
+    public Map<String, String> memberRole(@PathVariable Long projectId, @PathVariable Long accountId, @RequestBody RoleRequest request) {
+        projectService.setMemberRole(currentAccount.requireMember(), projectId, accountId, request.role());
+        return Map.of("role", request.role());
+    }
+
+    @GetMapping("/api/projects/{projectId}/members")
+    public List<ProjectMemberMapper.Member> members(@PathVariable Long projectId) {
+        return projectService.members(currentAccount.requireMember(), projectId);
     }
 
     @DeleteMapping("/api/projects/{projectId}")
@@ -51,7 +68,7 @@ public class ProjectController {
     @GetMapping("/api/projects/{projectId}/stages")
     public List<ProjectService.StageView> stages(@PathVariable Long projectId) {
         TeamMember member = currentAccount.requireMember();
-        return projectService.stages(projectService.requireInTeam(projectId, member.getTeamId()));
+        return projectService.stages(projectService.requireAccessible(projectId, member));
     }
 
     @PostMapping("/api/projects/{projectId}/stages")
@@ -73,10 +90,14 @@ public class ProjectController {
     public record NameRequest(
             @NotBlank(message = "请填写名称")
             @Size(max = 64, message = "名称最长 64 个字符")
-            String name
+            String name,
+            Long templateId,
+            String visibility
     ) {
     }
 
     public record StageUpdate(String name, Integer sortOrder) {
     }
+    public record VisibilityRequest(String visibility) {}
+    public record RoleRequest(String role) {}
 }

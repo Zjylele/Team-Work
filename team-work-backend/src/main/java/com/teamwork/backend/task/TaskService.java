@@ -11,11 +11,14 @@ import com.teamwork.backend.project.ProjectMapper;
 import com.teamwork.backend.project.ProjectService;
 import com.teamwork.backend.project.Stage;
 import com.teamwork.backend.team.Team;
+import com.teamwork.backend.team.TeamCalendar;
 import com.teamwork.backend.team.TeamMember;
 import com.teamwork.backend.team.TeamMemberMapper;
 import com.teamwork.backend.team.TeamService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import com.teamwork.backend.planning.TaskDependencyMapper;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -31,29 +34,38 @@ import java.util.stream.Collectors;
 public class TaskService {
 
     private final TaskMapper tasks;
+    private final TaskDependencyMapper dependencies;
     private final TaskCommentMapper comments;
+    private final TaskActivityMapper activities;
     private final AccountMapper accounts;
     private final TeamMemberMapper members;
     private final ProjectMapper projects;
     private final ProjectService projectService;
     private final TeamService teamService;
+    private final TeamCalendar teamCalendar;
     private final NotificationService notificationService;
+    private final TaskWorkflow workflow;
 
-    public TaskService(TaskMapper tasks, TaskCommentMapper comments, AccountMapper accounts,
+    public TaskService(TaskMapper tasks, TaskCommentMapper comments, TaskActivityMapper activities, AccountMapper accounts,
                        TeamMemberMapper members, ProjectMapper projects, ProjectService projectService,
-                       TeamService teamService, NotificationService notificationService) {
+                       TeamService teamService, NotificationService notificationService, TaskDependencyMapper dependencies,
+                       TeamCalendar teamCalendar, TaskWorkflow workflow) {
         this.tasks = tasks;
+        this.dependencies = dependencies;
         this.comments = comments;
+        this.activities = activities;
         this.accounts = accounts;
         this.members = members;
         this.projects = projects;
         this.projectService = projectService;
         this.teamService = teamService;
+        this.teamCalendar = teamCalendar;
         this.notificationService = notificationService;
+        this.workflow = workflow;
     }
 
     public List<TaskView> list(TeamMember member, Long projectId) {
-        Project project = projectService.requireInTeam(projectId, member.getTeamId());
+        Project project = projectService.requireAccessible(projectId, member);
         List<TaskItem> rows = tasks.selectList(new LambdaQueryWrapper<TaskItem>()
                 .eq(TaskItem::getProjectId, project.getId())
                 .orderByAsc(TaskItem::getId));
@@ -64,21 +76,24 @@ public class TaskService {
         return toView(requireTask(member, taskId));
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void delete(TeamMember creator, Long taskId) {
-        requireTask(creator, taskId);
+        TaskItem task = lockTask(creator, taskId);
+        projectService.requireWritable(task.getProjectId(), creator);
         tasks.deleteById(taskId);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TaskView create(TeamMember creator, Long projectId, String title, String description,
-                           Long assigneeId, Long stageId, String priority, String dueDate) {
-        Project project = projectService.requireInTeam(projectId, creator.getTeamId());
+                           Long assigneeId, Long stageId, String priority, String dueDate, String startDate) {
+        Project project = projectService.requireAccessible(projectId, creator);
+        projects.lock(projectId);
+        projectService.requireWritable(projectId, creator);
         Stage stage = projectService.requireStage(creator, stageId);
         if (!stage.getProjectId().equals(project.getId())) {
             throw new ApiException(400, "阶段不属于该项目");
         }
-        requireAssignee(creator.getTeamId(), assigneeId);
+        projectService.requireAssignable(project.getId(), assigneeId, creator.getTeamId());
         TaskItem task = new TaskItem();
         task.setProjectId(project.getId());
         task.setStageId(stage.getId());
@@ -87,22 +102,23 @@ public class TaskService {
         task.setAssigneeId(assigneeId);
         task.setStatus(TaskItem.TODO);
         task.setPriority("NONE");
-        applyPlanning(task, priority, dueDate);
+        applyPlanning(task, priority, dueDate, startDate);
         task.setCreatedAt(LocalDateTime.now());
         tasks.insert(task);
-        notificationService.notify(assigneeId, creator.getAccountId(), task.getId(), Notification.TASK_ASSIGNED);
+        notifyAssignment(task, creator);
         return toView(task);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TaskView update(TeamMember actor, Long taskId, String title, String description,
-                           Long assigneeId, Long stageId, String priority, String dueDate) {
-        TaskItem task = requireTask(actor, taskId);
+                           Long assigneeId, Long stageId, String priority, String dueDate, String startDate) {
+        TaskItem task = lockTask(actor, taskId);
+        projectService.requireWritable(task.getProjectId(), actor);
         if (!TeamMember.CREATOR.equals(actor.getRole())) {
             if (!task.getAssigneeId().equals(actor.getAccountId())) {
                 throw new ApiException(403, "只能补充自己负责任务的说明");
             }
-            if (title != null || assigneeId != null || stageId != null || priority != null || dueDate != null) {
+            if (title != null || assigneeId != null || stageId != null || priority != null || dueDate != null || startDate != null) {
                 throw new ApiException(403, "成员不能修改标题、负责人或阶段");
             }
             if (description == null) {
@@ -134,56 +150,144 @@ public class TaskService {
             }
             task.setStageId(stage.getId());
         }
-        applyPlanning(task, priority, dueDate);
+        String oldDueDate = java.util.Objects.toString(task.getDueDate(), null);
+        String oldStartDate = java.util.Objects.toString(task.getStartDate(), null);
+        applyPlanning(task, priority, dueDate, startDate);
         Long previousAssignee = task.getAssigneeId();
         if (assigneeId != null) {
-            requireAssignee(actor.getTeamId(), assigneeId);
+            projectService.requireAssignable(task.getProjectId(), assigneeId, actor.getTeamId());
             task.setAssigneeId(assigneeId);
         }
         tasks.updateById(task);
+        if (!java.util.Objects.equals(previousAssignee, task.getAssigneeId())) recordActivity(actor, task, "ASSIGNEE_CHANGED", previousAssignee.toString(), task.getAssigneeId().toString());
+        String newDueDate = task.getDueDate() == null ? null : task.getDueDate().toString();
+        if (!java.util.Objects.equals(oldDueDate, newDueDate)) recordActivity(actor, task, "DUE_DATE_CHANGED", oldDueDate, newDueDate);
+        String newStartDate = java.util.Objects.toString(task.getStartDate(), null);
+        if (!java.util.Objects.equals(oldStartDate, newStartDate)) {
+            recordActivity(actor, task, "START_DATE_CHANGED", oldStartDate, newStartDate);
+        }
         if (assigneeId != null && !assigneeId.equals(previousAssignee)) {
-            notificationService.notify(assigneeId, actor.getAccountId(), task.getId(), Notification.TASK_ASSIGNED);
+            notifyAssignment(task, actor);
         }
         return toView(task);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TaskView start(TeamMember member, Long taskId) {
         TaskItem task = requireOwnTask(member, taskId);
+        projectService.requireWritable(task.getProjectId(), member);
         if (!TaskItem.TODO.equals(task.getStatus())) {
             throw new ApiException(409, "只有待开始的任务可以开始");
         }
-        task.setStatus(TaskItem.DOING);
-        tasks.updateById(task);
-        notifyCreator(member, task, Notification.TASK_STARTED);
+        requireCompletedPredecessors(task);
+        transition(member, task, TaskItem.DOING);
+        if (workflow.config(task.getProjectId()).statusReminder())
+            notifyCreator(member, task, Notification.TASK_STARTED);
         return toView(task);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TaskView complete(TeamMember member, Long taskId) {
         TaskItem task = requireOwnTask(member, taskId);
+        projectService.requireWritable(task.getProjectId(), member);
         if (!TaskItem.DOING.equals(task.getStatus())) {
             throw new ApiException(409, "只有进行中的任务可以结束");
         }
-        task.setStatus(TaskItem.DONE);
-        tasks.updateById(task);
-        notifyCreator(member, task, Notification.TASK_COMPLETED);
+        var config = workflow.config(task.getProjectId());
+        if (config.approverId() != null) {
+            workflow.request(task, member, config.approverId());
+            transition(member, task, TaskWorkflow.REVIEW);
+        } else {
+            transition(member, task, TaskItem.DONE);
+            if (config.statusReminder()) notifyCreator(member, task, Notification.TASK_COMPLETED);
+        }
         return toView(task);
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public TaskView correct(TeamMember creator, Long taskId, String status) {
         if (!TaskItem.valid(status)) {
             throw new ApiException(400, "状态只能是待开始、进行中或已完成");
         }
-        TaskItem task = requireTask(creator, taskId);
+        TaskItem task = lockTask(creator, taskId);
+        projectService.requireWritable(task.getProjectId(), creator);
         if (!status.equals(task.getStatus())) {
-            task.setStatus(status);
-            tasks.updateById(task);
-            notificationService.notify(task.getAssigneeId(), creator.getAccountId(), task.getId(),
-                    Notification.TASK_STATUS_CHANGED);
+            String previousStatus = task.getStatus();
+            if (!TaskItem.TODO.equals(status) && TaskItem.TODO.equals(previousStatus)) {
+                requireCompletedPredecessors(task);
+            }
+            var config = workflow.config(task.getProjectId());
+            if (TaskWorkflow.REVIEW.equals(previousStatus) || (config.approverId() != null && TaskItem.DONE.equals(status))) {
+                throw new ApiException(409, "请通过审批完成或退回任务");
+            }
+            transition(creator, task, status);
         }
         return toView(task);
+    }
+
+    public List<TaskWorkflow.Approval> approvals(TeamMember member, Long taskId) {
+        requireTask(member, taskId);
+        return workflow.history(taskId);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public TaskView decide(TeamMember actor, Long taskId, Long approvalId, boolean approved, String comment) {
+        TaskItem task = lockTask(actor, taskId);
+        projectService.requireWritable(task.getProjectId(), actor);
+        var approval = requireApproval(taskId, approvalId);
+        if (!approval.approverId().equals(actor.getAccountId())) throw new ApiException(403, "仅指定审批人可以处理");
+        String outcome = approved ? "APPROVED" : "REJECTED";
+        String reason = comment == null ? "" : comment.strip();
+        if (!approval.status().equals("PENDING")) {
+            if (outcome.equals(approval.status()) && reason.equals(approval.comment())) return toView(task);
+            throw new ApiException(409, "该审批已处理");
+        }
+        if (!TaskWorkflow.REVIEW.equals(task.getStatus())) throw new ApiException(409, "任务不在待验收状态");
+        workflow.decide(approvalId, approved, reason);
+        recordActivity(actor, task, "APPROVAL_" + outcome, null, Long.toString(approvalId));
+        transition(actor, task, approved ? TaskItem.DONE : TaskItem.DOING);
+        return toView(task);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public TaskView reassignApproval(TeamMember actor, Long taskId, Long approvalId) {
+        TaskItem task = lockTask(actor, taskId);
+        var project = projectService.requireAccessible(task.getProjectId(), actor);
+        String role = projectService.role(project, actor);
+        if (!"OWNER".equals(role) && !"ADMIN".equals(role)) {
+            throw new ApiException(403, "只有项目所有者或管理员可以转交审批");
+        }
+        var approval = requireApproval(taskId, approvalId);
+        if (!TaskWorkflow.REVIEW.equals(task.getStatus()) || !"PENDING".equals(approval.status())) {
+            throw new ApiException(409, "只能转交待处理的审批");
+        }
+        Long approver = workflow.config(task.getProjectId()).approverId();
+        if (approver == null) throw new ApiException(409, "请先在项目设置中指定新的审批人");
+        projectService.requireAssignable(task.getProjectId(), approver, actor.getTeamId());
+        if (!approver.equals(approval.approverId())) {
+            workflow.reassign(taskId, approvalId, approver);
+            recordActivity(actor, task, "APPROVAL_REASSIGNED", approval.approverId().toString(), approver.toString());
+        }
+        return toView(task);
+    }
+
+    private TaskWorkflow.Approval requireApproval(Long taskId, Long approvalId) {
+        return workflow.history(taskId).stream().filter(row -> row.id().equals(approvalId)).findFirst()
+                .orElseThrow(() -> new ApiException(404, "审批不存在"));
+    }
+
+    private void transition(TeamMember actor, TaskItem task, String status) {
+        String previous = task.getStatus();
+        task.setStatus(status);
+        if (tasks.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<TaskItem>()
+                .eq(TaskItem::getId, task.getId()).eq(TaskItem::getStatus, previous)
+                .set(TaskItem::getStatus, status)) != 1) throw new ApiException(409, "任务状态已变化，请刷新后重试");
+        recordActivity(actor, task, "STATUS_CHANGED", previous, status);
+        notifyAutomation(task, task.getAssigneeId(), actor, Notification.TASK_STATUS_CHANGED, false);
+    }
+
+    private void notifyAssignment(TaskItem task, TeamMember actor) {
+        notifyAutomation(task, task.getAssigneeId(), actor, Notification.TASK_ASSIGNED, true);
     }
 
     public List<CommentView> comments(TeamMember member, Long taskId) {
@@ -195,9 +299,26 @@ public class TaskService {
         return rows.stream().map(row -> CommentView.from(row, authors.get(row.getAuthorId()))).toList();
     }
 
-    @Transactional
+    public List<ActivityView> activity(TeamMember member, Long taskId) {
+        requireTask(member, taskId);
+        List<TaskActivity> rows = activities.selectList(new LambdaQueryWrapper<TaskActivity>()
+                .eq(TaskActivity::getTaskId, taskId).orderByAsc(TaskActivity::getCreatedAt).orderByAsc(TaskActivity::getId));
+        Map<Long, Account> people = loadAccounts(rows.stream().map(TaskActivity::getActorId).collect(Collectors.toSet()));
+        return rows.stream().map(a -> new ActivityView(a.getId(), a.getTaskId(), a.getActorId(),
+                people.containsKey(a.getActorId()) ? people.get(a.getActorId()).getDisplayName() : "", a.getAction(),
+                a.getBeforeValue(), a.getAfterValue(), a.getCreatedAt())).toList();
+    }
+
+    private void recordActivity(TeamMember actor, TaskItem task, String action, String before, String after) {
+        TaskActivity row = new TaskActivity(); row.setTaskId(task.getId()); row.setActorId(actor.getAccountId());
+        row.setAction(action); row.setBeforeValue(before); row.setAfterValue(after); row.setCreatedAt(teamCalendar.now());
+        activities.insert(row);
+    }
+
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public CommentView comment(TeamMember member, Long taskId, String content) {
         TaskItem task = requireTask(member, taskId);
+        projectService.requireWritable(task.getProjectId(), member);
         TaskComment comment = new TaskComment();
         comment.setTaskId(task.getId());
         comment.setAuthorId(member.getAccountId());
@@ -219,7 +340,7 @@ public class TaskService {
     }
 
     public List<TaskView> openTasks(TeamMember member) {
-        List<Long> projectIds = projectIds(member.getTeamId());
+        List<Long> projectIds = projectService.list(member).stream().map(ProjectService.ProjectView::id).toList();
         if (projectIds.isEmpty()) {
             return List.of();
         }
@@ -231,14 +352,14 @@ public class TaskService {
         return toViews(rows);
     }
 
-    public long inProgressProjectCount(Long teamId) {
-        List<Long> projectIds = projectIds(teamId);
+    public long inProgressProjectCount(TeamMember member) {
+        List<Long> projectIds = projectService.list(member).stream().map(ProjectService.ProjectView::id).toList();
         if (projectIds.isEmpty()) {
             return 0;
         }
         return tasks.selectList(new LambdaQueryWrapper<TaskItem>()
                         .in(TaskItem::getProjectId, projectIds)
-                        .eq(TaskItem::getStatus, TaskItem.DOING))
+                        .in(TaskItem::getStatus, TaskItem.DOING, TaskWorkflow.REVIEW))
                 .stream()
                 .map(TaskItem::getProjectId)
                 .distinct()
@@ -250,15 +371,37 @@ public class TaskService {
             return;
         }
         Team team = teamService.requireTeam(actor.getTeamId());
-        notificationService.notify(team.getCreatedBy(), actor.getAccountId(), task.getId(), type);
+        notifyAutomation(task, team.getCreatedBy(), actor, type, false);
+    }
+
+    private void notifyAutomation(TaskItem task, Long recipient, TeamMember actor, String type, boolean assignment) {
+        if (recipient.equals(actor.getAccountId())) return;
+        var config = workflow.storedConfig(task.getProjectId());
+        if (config.isEmpty()) {
+            notificationService.notify(recipient, actor.getAccountId(), task.getId(), type);
+        } else if (assignment ? config.get().assignmentReminder() : config.get().statusReminder()) {
+            workflow.event(task.getId(), recipient, type, java.util.UUID.randomUUID().toString());
+        }
     }
 
     private TaskItem requireOwnTask(TeamMember member, Long taskId) {
-        TaskItem task = requireTask(member, taskId);
+        TaskItem task = lockTask(member, taskId);
         if (!task.getAssigneeId().equals(member.getAccountId())) {
             throw new ApiException(403, "只能处理自己负责的任务");
         }
         return task;
+    }
+
+    private void requireCompletedPredecessors(TaskItem task) {
+        if (dependencies.incompletePredecessors(task.getId()) > 0) {
+            throw new ApiException(409, "请先完成前置任务");
+        }
+    }
+
+    private TaskItem lockTask(TeamMember member, Long taskId) {
+        TaskItem task = requireTask(member, taskId);
+        projects.lock(task.getProjectId());
+        return requireTask(member, taskId);
     }
 
     private TaskItem requireTask(TeamMember member, Long taskId) {
@@ -266,7 +409,7 @@ public class TaskService {
         if (task == null) {
             throw new ApiException(404, "任务不存在");
         }
-        projectService.requireInTeam(task.getProjectId(), member.getTeamId());
+        projectService.requireAccessible(task.getProjectId(), member);
         return task;
     }
 
@@ -302,7 +445,7 @@ public class TaskService {
         return accounts.selectByIds(ids).stream().collect(Collectors.toMap(Account::getId, Function.identity()));
     }
 
-    private void applyPlanning(TaskItem task, String priority, String dueDate) {
+    private void applyPlanning(TaskItem task, String priority, String dueDate, String startDate) {
         if (priority != null) {
             switch (priority) {
                 case "NONE", "LOW", "MEDIUM", "HIGH", "URGENT" -> task.setPriority(priority);
@@ -310,11 +453,22 @@ public class TaskService {
             }
         }
         if (dueDate != null) {
-            try {
-                task.setDueDate(dueDate.isEmpty() ? null : LocalDate.parse(dueDate));
-            } catch (DateTimeParseException exception) {
-                throw new ApiException(400, "截止日期格式应为 YYYY-MM-DD");
-            }
+            task.setDueDate(parseDate(dueDate, "截止日期"));
+        }
+        if (startDate != null) {
+            task.setStartDate(parseDate(startDate, "开始日期"));
+        }
+        if (task.getStartDate() != null && task.getDueDate() != null
+                && task.getDueDate().isBefore(task.getStartDate())) {
+            throw new ApiException(400, "截止日期不能早于开始日期");
+        }
+    }
+
+    private LocalDate parseDate(String value, String label) {
+        try {
+            return value.isEmpty() ? null : LocalDate.parse(value);
+        } catch (DateTimeParseException exception) {
+            throw new ApiException(400, label + "格式应为 YYYY-MM-DD");
         }
     }
 
@@ -329,12 +483,13 @@ public class TaskService {
             String status,
             String priority,
             LocalDate dueDate,
+            LocalDate startDate,
             LocalDateTime createdAt
     ) {
         static TaskView from(TaskItem task, Account assignee) {
             return new TaskView(task.getId(), task.getProjectId(), task.getStageId(), task.getTitle(),
                     task.getDescription(), task.getAssigneeId(),
-                    assignee == null ? "" : assignee.getDisplayName(), task.getStatus(), task.getPriority(), task.getDueDate(), task.getCreatedAt());
+                    assignee == null ? "" : assignee.getDisplayName(), task.getStatus(), task.getPriority(), task.getDueDate(), task.getStartDate(), task.getCreatedAt());
         }
     }
 
@@ -345,4 +500,6 @@ public class TaskService {
                     author == null ? "" : author.getDisplayName(), comment.getContent(), comment.getCreatedAt());
         }
     }
+    public record ActivityView(Long id, Long taskId, Long actorId, String actorName, String action,
+                               String beforeValue, String afterValue, LocalDateTime createdAt) {}
 }

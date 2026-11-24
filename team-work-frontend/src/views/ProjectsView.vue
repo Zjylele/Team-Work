@@ -11,7 +11,8 @@ const session = useSessionStore()
 const router = useRouter()
 const projects = ref<Project[]>([])
 const dialog = ref(false)
-const form = reactive({ name: '' })
+const form = reactive({ name: '', visibility: 'SHARED' as 'SHARED'|'PRIVATE', templateId: undefined as number|undefined })
+const templates = ref<{id:number;name:string;description?:string}[]>([])
 
 async function load() {
   try {
@@ -23,7 +24,7 @@ async function load() {
 
 async function create() {
   try {
-    const created = await projectApi.create(form.name)
+    const created = await projectApi.create(form.name, form.templateId, form.visibility)
     dialog.value = false
     form.name = ''
     ElMessage.success('项目已创建')
@@ -53,6 +54,7 @@ async function rename(project: Project) {
 }
 
 onMounted(load)
+onMounted(async()=>{try{templates.value=await projectApi.templates()}catch{/* Templates endpoint may be unavailable */}})
 </script>
 
 <template>
@@ -69,7 +71,7 @@ onMounted(load)
         class="item"
         @click="router.push(`/projects/${project.id}`)"
       >
-        {{ project.name }}
+        {{ project.name }} <el-tag size="small">{{ project.visibility==='PRIVATE'?'私人':'共享' }}</el-tag><el-tag v-if="project.role" size="small" type="info">{{project.role}}</el-tag>
         <el-button
           v-if="session.isCreator"
           link
@@ -84,6 +86,8 @@ onMounted(load)
     </div>
     <el-dialog v-model="dialog" title="新建项目" width="400px">
       <el-input v-model="form.name" placeholder="项目名称" />
+      <el-select v-model="form.visibility" aria-label="项目可见范围" style="width:100%;margin-top:12px"><el-option label="团队共享" value="SHARED"/><el-option label="仅自己可见" value="PRIVATE"/></el-select>
+      <el-select v-if="templates.length" v-model="form.templateId" clearable placeholder="从模板创建（可选）" style="width:100%;margin-top:12px"><el-option v-for="t in templates" :key="t.id" :label="t.name" :value="t.id"/></el-select>
       <template #footer>
         <el-button @click="dialog = false">取消</el-button>
         <el-button type="primary" @click="create">创建</el-button>

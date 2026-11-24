@@ -28,8 +28,8 @@ public class WorkbenchController {
         TeamMember member = currentAccount.requireMember();
         return new WorkbenchView(
                 taskService.openTasks(member),
-                taskService.inProgressProjectCount(member.getTeamId()),
-                notificationService.recent(member.getAccountId(), 10));
+                taskService.inProgressProjectCount(member),
+                notificationService.list(member).stream().limit(10).toList());
     }
 
     public record WorkbenchView(
