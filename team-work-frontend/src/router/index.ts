@@ -55,10 +55,7 @@ const router = createRouter({
         {
           path: 'projects/:projectId',
           name: 'project',
-          component: pickView(
-            () => import('../views/ProjectDetailView.vue'),
-            () => import('../views/v2/ProjectDetailView.vue'),
-          ),
+          component: () => import('../views/v2/ProjectDetailView.vue'),
         },
         {
           path: 'projects/:projectId/operations',
