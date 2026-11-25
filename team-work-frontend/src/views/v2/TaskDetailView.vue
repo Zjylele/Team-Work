@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { describeTaskActivity } from '../../utils/taskActivity'
 import TaskOperations from '../../components/TaskOperations.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -184,28 +185,31 @@ async function removeTask() {
 
 <template>
   <div v-if="task && task.id === taskId" class="v2-page">
-    <div class="v2-link-back">
-      <el-button link @click="router.push(`/projects/${task.projectId}`)">返回项目</el-button>
+    <div class="v2-link-back task-back">
+      <button type="button" class="back-button" @click="router.push(`/projects/${task.projectId}`)">返回</button>
     </div>
-    <header class="v2-page-header head">
-      <h1 class="v2-title">{{ task.title }}</h1>
-      <p>优先级 {{ PRIORITY_LABELS[task.priority] }} · 开始 {{ task.startDate || "未设置" }} · 截止 {{ task.dueDate || "未设置" }}</p>
-      <el-tag :type="statusType(task.status)">{{ statusLabel(task.status) }}</el-tag>
+    <header class="task-heading">
+      <div>
+        <p class="task-number">任务 #{{ task.id }}</p>
+        <div class="title-line">
+          <h1>{{ task.title }}</h1>
+          <el-tag :type="statusType(task.status)" round>{{ statusLabel(task.status) }}</el-tag>
+        </div>
+      </div>
+      <div class="heading-actions">
+        <el-button v-if="isAssignee && task.status === 'TODO'" type="primary" @click="start">开始任务</el-button>
+        <el-button v-if="isAssignee && task.status === 'DOING'" type="success" @click="complete">结束任务</el-button>
+        <el-button v-if="session.isCreator" @click="saveMeta">保存任务设置</el-button>
+        <el-button v-if="session.isCreator" type="danger" plain :loading="deleting" @click="removeTask">删除任务</el-button>
+      </div>
     </header>
-    <p class="v2-subtitle">负责人 {{ task.assigneeName }}</p>
 
     <div class="detail-layout">
-    <div>
-    <div class="actions">
-      <el-button v-if="isAssignee && task.status === 'TODO'" type="primary" @click="start">开始</el-button>
-      <el-button v-if="isAssignee && task.status === 'DOING'" type="success" @click="complete">结束</el-button>
-    </div>
-
-    <el-button v-if="session.isCreator" type="danger" plain :loading="deleting" @click="removeTask">删除任务</el-button>
+    <div class="detail-main">
     <el-card v-if="session.isCreator" shadow="never" class="v2-card block">
-      <h2 class="section">创建者维护</h2>
-      <el-form label-position="top">
-        <el-form-item label="标题">
+      <h2 class="section">基础设置 <small>创建者维护</small></h2>
+      <el-form label-position="top" class="settings-form">
+        <el-form-item label="任务标题" class="full-width">
           <el-input v-model="title" />
         </el-form-item>
         <el-form-item label="优先级">
@@ -232,8 +236,8 @@ async function removeTask() {
             <el-option v-for="stage in stages" :key="stage.id" :label="stage.name" :value="stage.id" />
           </el-select>
         </el-form-item>
-        <el-button type="primary" @click="saveMeta">保存任务设置</el-button>
-        <el-form-item label="纠正状态" style="margin-top: 16px">
+        <div class="full-width"><el-button type="primary" @click="saveMeta">保存任务设置</el-button></div>
+        <el-form-item label="纠正状态" class="full-width status-correction">
           <el-select v-model="correctStatus" style="width: 200px">
             <el-option v-for="item in STATUS_OPTIONS.filter(option => option.value !== 'REVIEW')" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
@@ -243,7 +247,7 @@ async function removeTask() {
     </el-card>
 
     <el-card shadow="never" class="v2-card block">
-      <h2 class="section">说明</h2>
+      <h2 class="section">任务说明</h2>
       <el-input v-model="description" type="textarea" :rows="5" :disabled="!isAssignee && !session.isCreator" />
       <el-button v-if="isAssignee || session.isCreator" style="margin-top: 8px" @click="saveDescription">
         保存说明
@@ -251,7 +255,7 @@ async function removeTask() {
     </el-card>
     <el-card v-if="customFields.some(field=>field.visible)" shadow="never" class="v2-card block">
       <h2 class="section">自定义字段</h2>
-      <el-form label-position="top">
+      <el-form label-position="top" class="settings-form">
         <el-form-item v-for="field in customFields.filter(item=>item.visible)" :key="field.id" :label="field.name">
           <el-select v-if="field.type==='SINGLE_SELECT'" v-model="customValues[String(field.id)]" clearable style="width:100%">
             <el-option v-for="option in field.options" :key="option.id" :label="option.label" :value="option.label"/>
@@ -262,27 +266,41 @@ async function removeTask() {
       </el-form>
     </el-card>
 
-    </div>
-    <el-card shadow="never" class="v2-card block discussion">
-      <h2 class="section">任务动态</h2>
-      <div v-for="item in activities" :key="item.id" class="comment">
-        <div class="who">{{ item.actorName }} · {{ formatTime(item.createdAt) }}</div>
-        <div>{{ item.action }}<span v-if="item.beforeValue || item.afterValue">：{{ item.beforeValue || '—' }} → {{ item.afterValue || '—' }}</span></div>
+      <div class="task-operations">
+        <TaskOperations v-if="task && task.id === taskId" :key="task.id" :task-id="task.id" :status="task.status" :project-id="task.projectId" @changed="load" />
       </div>
-      <p v-if="!activities.length" class="empty-comments">暂无动态</p>
-    </el-card>
     <el-card shadow="never" class="v2-card block discussion">
-      <h2 class="section">评论 <span>{{ comments.length }}</span></h2>
+      <h2 class="section">讨论与评论 <span>{{ comments.length }}</span></h2>
       <p v-if="!comments.length" class="empty-comments">暂无评论</p>
       <div v-for="item in comments" :key="item.id" class="comment">
         <div class="who">{{ item.authorName }} · {{ formatTime(item.createdAt) }}</div>
         <div>{{ item.content }}</div>
       </div>
       <el-input v-model="commentText" type="textarea" :rows="3" placeholder="发表评论" />
-      <el-button style="margin-top: 8px" type="primary" @click="addComment">评论</el-button>
+      <el-button style="margin-top: 8px" type="primary" @click="addComment">发表评论</el-button>
     </el-card>
     </div>
-    <TaskOperations v-if="task && task.id === taskId" :key="task.id" :task-id="task.id" :status="task.status" :project-id="task.projectId" @changed="load" />
+    <aside aria-label="任务信息">
+      <el-card shadow="never" class="v2-card block">
+        <h2 class="section">任务属性</h2>
+        <dl class="properties">
+          <div><dt>负责人</dt><dd>{{ task.assigneeName }}</dd></div>
+          <div><dt>优先级</dt><dd>{{ PRIORITY_LABELS[task.priority] }}</dd></div>
+          <div><dt>开始日期</dt><dd>{{ task.startDate || "未设置" }}</dd></div>
+          <div><dt>截止日期</dt><dd>{{ task.dueDate || "未设置" }}</dd></div>
+        </dl>
+      </el-card>
+    <el-card shadow="never" class="v2-card block discussion">
+      <h2 class="section">任务动态</h2>
+      <div v-for="item in activities" :key="item.id" class="comment">
+        <div class="who">{{ item.actorName }} · {{ formatTime(item.createdAt) }}</div>
+        <div>{{ describeTaskActivity(item) }}</div>
+      </div>
+      <p v-if="!activities.length" class="empty-comments">暂无动态</p>
+    </el-card>
+    </aside>
+    </div>
+
   </div>
 </template>
 
@@ -316,12 +334,43 @@ async function removeTask() {
 .detail-layout {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
-  gap: 16px;
+  gap: 24px;
   align-items: start;
   margin-top: 16px;
 }
+.properties { display: grid; gap: 12px; margin: 0; font-size: 13px; }
+.properties div { display: grid; grid-template-columns: 6em minmax(0, 1fr); gap: 8px; }
+.properties dt { color: var(--color-muted-foreground); }
+.properties dd { margin: 0; overflow-wrap: anywhere; }
 .discussion .section { border-bottom: 1px solid var(--color-border); padding-bottom: 12px; }
-.discussion .section span { margin-left: 8px; background: #edf0f6; padding: 2px 7px; border-radius: 10px; font-size: 12px; }
+.discussion .section span { margin-left: 8px; background: var(--color-muted); padding: 2px 7px; border-radius: 10px; font-size: 12px; }
 .empty-comments { margin: 20px 0; font-size: 13px; }
 @media (max-width: 820px) { .detail-layout { grid-template-columns: minmax(0, 1fr); } }
+.v2-page { --task-field-background: #f2f4f6; max-width: 1520px; margin-inline: auto; }
+.v2-page :deep(.el-input__wrapper),
+.v2-page :deep(.el-select__wrapper),
+.v2-page :deep(.el-textarea__inner) {
+  --el-input-bg-color: var(--task-field-background);
+  --el-fill-color-blank: var(--task-field-background);
+}
+.task-back { margin-bottom: 14px; }
+.task-heading { display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px; padding: 20px 24px; border-radius: 15px; border: 1px solid var(--color-border); background: var(--color-card); }
+.task-number { margin: 0 0 6px; color: var(--color-muted-foreground); font-size: 12px; }
+.title-line, .heading-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.title-line h1 { margin: 0; font-size: clamp(22px, 3vw, 32px); overflow-wrap: anywhere; }
+.heading-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.detail-layout { grid-template-columns: minmax(0, 2.35fr) minmax(240px, 1fr); gap: 20px; margin-top: 20px; }
+.detail-main, .detail-layout aside { min-width: 0; }
+.block { background: var(--color-card); border-radius: 14px; padding: 0; margin-bottom: 16px; }
+.section { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 17px; }
+.section small { font-size: 12px; font-weight: 500; color: var(--color-muted-foreground); }
+.settings-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.settings-form :deep(.el-select) { width: 100%; }
+.full-width { grid-column: 1 / -1; }
+.status-correction { margin-top: 14px; margin-bottom: 0; }
+.task-operations { margin-bottom: 16px; }
+.task-operations :deep(.el-card) { border-radius: 14px; box-shadow: none; }
+.task-operations :deep(.el-empty) { --el-empty-padding: 15px 0; --el-empty-image-width: 50px; }
+@media (max-width: 820px) { .detail-layout { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .settings-form { grid-template-columns: minmax(0, 1fr); } }
 </style>
