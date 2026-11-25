@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { describeTaskActivity } from '../utils/taskActivity'
 import TaskOperations from '../components/TaskOperations.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -184,7 +185,7 @@ async function removeTask() {
 
 <template>
   <div v-if="task && task.id === taskId">
-    <el-button link @click="router.push(`/projects/${task.projectId}`)">返回项目</el-button>
+    <button type="button" class="back-button" @click="router.push(`/projects/${task.projectId}`)">返回</button>
     <div class="head">
       <h1>{{ task.title }}</h1>
       <p>优先级 {{ PRIORITY_LABELS[task.priority] }} · 开始 {{ task.startDate || "未设置" }} · 截止 {{ task.dueDate || "未设置" }}</p>
@@ -256,7 +257,7 @@ async function removeTask() {
       <h2>任务动态</h2>
       <div v-for="item in activities" :key="item.id" class="comment">
         <div class="who">{{ item.actorName }} · {{ formatTime(item.createdAt) }}</div>
-        <div>{{ item.action }}<span v-if="item.beforeValue || item.afterValue">：{{ item.beforeValue || '—' }} → {{ item.afterValue || '—' }}</span></div>
+        <div>{{ describeTaskActivity(item) }}</div>
       </div>
       <p v-if="!activities.length" class="who">暂无动态</p>
     </el-card>
