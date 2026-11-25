@@ -195,6 +195,7 @@ watch(() => route.query.date, (value) => {
 .day-label { display: block; margin-left: auto; padding: 3px 6px; border-radius: 4px; font-size: 12px; }
 .day-label:hover { background: #e9f1ff; }
 .calendar-task { display: block; font-size: 12px; margin-top: 5px; padding: 4px 6px; border-radius: 3px; border-left: 3px solid #82a7ec; background: #edf3ff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.calendar-task[data-status] { text-decoration: none; }
 .calendar-task[data-status='DOING'] { background: #fff3d8; border-color: #dfac4d; }
 .calendar-task[data-status='DONE'] { background: #e6f7ee; border-color: #74bd98; }
 .calendar-task.plan { background: #f3eaff; border-color: #ab83d1; }
