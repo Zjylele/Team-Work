@@ -116,6 +116,7 @@ onMounted(load)
 </template>
 
 <style scoped>
+.dashboard a { text-decoration: none; }
 .dashboard { max-width: 1680px; margin: 0 auto; }
 .dashboard-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .dashboard-bar h1 { font-size: clamp(28px, 4vw, 42px); font-weight: 650; margin: 0 0 4px; }

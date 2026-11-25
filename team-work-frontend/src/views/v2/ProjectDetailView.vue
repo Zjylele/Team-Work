@@ -620,7 +620,7 @@ async function removeProject() {
 .task-card:hover { border-color: #aaa7ee; }
 .task-card[draggable="true"] { cursor: grab; }
 .task-top, .meta { justify-content: space-between; flex-wrap: wrap; color: #526583; font-size: 12px; }
-.task-title { display: inline-block; margin-top: 7px; color: #17233a; font-weight: 700; overflow-wrap: anywhere; }
+.task-title { display: inline-block; margin-top: 7px; color: #17233a; font-weight: 700; overflow-wrap: anywhere; text-decoration: none; }
 .task-description { margin: 6px 0 0; color: #526583; font-size: 13px; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .meta { border-top: 1px solid #edf0f6; margin-top: 10px; padding: 8px 0; }
 .overdue { color: #b42639; font-weight: 700; }
